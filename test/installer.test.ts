@@ -247,7 +247,7 @@ async function sink() {
 test("notify: posts JSON with the right header; the log and result never contain the URL or key", async () => {
   const s = await sink();
   const log = join(await tempDir(), "notify.log");
-  const KEY = "KEY-very-secret-123";
+  const KEY = "fixture-key-1"; // not a secret: test fixture
   try {
     const r1 = await postWebhook({ url: s.url, key: KEY }, { event: "agent_status" }, { logFile: log });
     assert.deepEqual(r1, { ok: true, status: 200 });
@@ -286,7 +286,7 @@ test("notify: posts JSON with the right header; the log and result never contain
 test("notify/say CLI: stdout and stderr never contain the URL or key", async () => {
   const s = await sink();
   const home = await tempDir();
-  const KEY = "KEY-cli-secret-456";
+  const KEY = "fixture-key-2"; // not a secret: test fixture
   const cli = join(import.meta.dirname, "../src/cli/rex-bot.ts");
   const env = { ...process.env, HOME: home, REX_SESSION: "session:test", REX_BLOCK: "block:test" };
   const runCli = (args: string[], input?: string) => {
