@@ -44,6 +44,8 @@ export interface OpsDeps {
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
   pollMs?: number;
+  /** Delay between a paste and the Enter that submits it (default 150ms). */
+  pasteSettleMs?: number;
 }
 
 /** Runs fn over items with at most `limit` in flight. */
@@ -69,6 +71,7 @@ export class Ops {
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly now: () => number;
   private readonly pollMs: number;
+  private readonly pasteSettleMs: number;
 
   constructor(private readonly deps: OpsDeps) {
     this.rex = deps.rex;
@@ -76,6 +79,7 @@ export class Ops {
     this.sleep = deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
     this.now = deps.now ?? Date.now;
     this.pollMs = deps.pollMs ?? 1000;
+    this.pasteSettleMs = deps.pasteSettleMs ?? 150;
   }
 
   /** Finds which session owns a block (rex scopes most block commands to a session). */
@@ -144,8 +148,12 @@ export class Ops {
         );
       }
     }
-    await this.rex.send(session, opts.block_id, opts.text);
-    if (opts.submit) await this.rex.sendKeys(session, opts.block_id, ["enter"]);
+    await this.rex.paste(session, opts.block_id, opts.text);
+    if (opts.submit) {
+      // Let the program finish ingesting the paste before Enter, or a TUI may treat Enter as part of it.
+      await this.sleep(this.pasteSettleMs);
+      await this.rex.sendKeys(session, opts.block_id, ["enter"]);
+    }
     return { session_id: session, block_id: opts.block_id, sent_chars: opts.text.length, submitted: opts.submit };
   }
 

@@ -16,7 +16,7 @@ The agent → bot direction (status pushes) is the existing `~/.config/rex/bot-w
 
 - Listens on `127.0.0.1:7400` only. Exposure is a separate, explicit `tailscale serve` (tailnet only, never `funnel`).
 - `Authorization: Bearer <token>` required on `/mcp` (constant-time compare, 401 otherwise). Token lives in `~/.config/rex-bot-bridge/token` (mode 600) and is never logged. It is re-read per request, so rotating takes effect immediately.
-- `rex` is run with argument arrays, never through a shell. IDs and key names are validated; message text goes to `rex send` over stdin.
+- `rex` is run with argument arrays, never through a shell. IDs and key names are validated; message text is delivered as a Rex paste event (`rex api call block.event -`, JSON over stdin, never in argv).
 - Every tool call is appended to `~/.local/state/rex-bot-bridge/audit.log` (JSONL: timestamp, tool, args with long strings truncated to 200 chars, ok/error, duration). No token, no pane contents.
 - `GET /healthz` is unauthenticated and returns only `{ok, rex_reachable, watcher_heartbeat_age_s}`.
 - `read_pane` output is untrusted program output; the tool description tells the model so.
@@ -65,7 +65,7 @@ Use the static header, not OAuth (OAuth sign-in for private tailnet MCP servers 
 |---|---|---|
 | `list_agents` | `session?` | Every session → panes: ids/labels, window, foreground process (name, cwd, pid), program status (`state`, `kind`, `app`, `msg`), `watched` |
 | `read_pane` | `block_id`, `session_id?`, `lines=80` (≤2000) | Tail of the pane's screen + scrollback (untrusted) |
-| `send_message` | `block_id`, `session_id?`, `text`, `submit=true`, `require_idle=false` | Pastes text, then Enter. `require_idle` refuses while the agent reports `working` |
+| `send_message` | `block_id`, `session_id?`, `text`, `submit=true`, `require_idle=false` | Delivers text as one paste event (bracketed paste when the program enables it; TUIs mangle long typed bursts), waits 150 ms, then Enter. `require_idle` refuses while the agent reports `working` |
 | `send_keys` | `block_id`, `session_id?`, `keys[]` | e.g. `["escape"]`, `["ctrl+c"]`, `["1","enter"]` (Rex key syntax) |
 | `spawn_agent` | `agent`, `cwd`, `prompt?`, `session_id?` \| `new_session_label?`, `label?`, `command?`, `watch=true` | New tab in a session, or a new session. Returns `session_id`, `block_id` |
 | `wait_for_status` | `block_id`, `session_id?`, `states=[done,blocked,error,idle]`, `timeout_s=120` (≤600) | Polls program status; returns the record or `timed_out: true` |

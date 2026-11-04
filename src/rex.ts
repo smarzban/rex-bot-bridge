@@ -193,9 +193,14 @@ export class Rex {
     return this.exec(["capture", "-s", session, "-b", block, "--trim", "--unwrap"], { timeoutMs: 30_000 });
   }
 
-  /** Text goes over stdin, so it is never parsed as a flag and has no argv length limit. */
-  async send(session: string, block: string, text: string): Promise<void> {
-    await this.exec(["send", "-s", session, "-b", block], { input: text });
+  /**
+   * Delivers text as one paste event (Rex wraps it in bracketed-paste markers when the program asked for
+   * them), not as typed keystrokes: TUIs such as Claude Code mangle long raw keystroke bursts.
+   * The JSON args go over stdin, so the text is never in argv.
+   */
+  async paste(session: string, block: string, text: string): Promise<void> {
+    const args = { session_id: session, block_id: block, event: { type: "paste", payload: { text } } };
+    await this.exec(["api", "call", "block.event", "-"], { input: JSON.stringify(args) });
   }
 
   async sendKeys(session: string, block: string, keys: string[]): Promise<void> {

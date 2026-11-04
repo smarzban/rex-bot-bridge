@@ -30,7 +30,8 @@ export class FakeRex {
     this.calls.push({ args, input: opts.input });
     const ok = (v: unknown) => ({ stdout: typeof v === "string" ? v : JSON.stringify(v), stderr: "", code: 0 });
     const key = args.slice(0, 2).join(" ");
-    if (key === "api call") return ok({ rex_version: "0.0.test", api_revision: 10 });
+    if (key === "api call" && args[2] === "server.version") return ok({ rex_version: "0.0.test", api_revision: 10 });
+    if (key === "api call" && args[2] === "block.event") return ok({});
     if (key === "ls --json") return ok({ sessions: [{ session_id: S1, label: "work" }] });
     if (key === "block ls")
       return ok({
@@ -63,6 +64,13 @@ export class FakeRex {
 
   callsOf(cmd: string): Call[] {
     return this.calls.filter((c) => c.args[0] === cmd);
+  }
+
+  /** block.event calls, with their stdin JSON parsed. */
+  pastes(): { session_id: string; block_id: string; event: { type: string; payload: { text: string } } }[] {
+    return this.calls
+      .filter((c) => c.args[0] === "api" && c.args[2] === "block.event")
+      .map((c) => JSON.parse(c.input ?? "{}"));
   }
 }
 

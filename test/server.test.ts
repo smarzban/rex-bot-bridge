@@ -55,7 +55,7 @@ test("healthz needs no auth and returns only ok/rex_reachable/heartbeat", async 
 test("healthz caches the rex probe for 5s and coalesces concurrent hits into one subprocess", async () => {
   const b = await startBridge();
   try {
-    const probes = () => b.fake.calls.filter((c) => c.args[0] === "api").length;
+    const probes = () => b.fake.calls.filter((c) => c.args[2] === "server.version").length;
     const burst = await Promise.all(Array.from({ length: 20 }, () => fetch(b.url + "/healthz").then((r) => r.json())));
     assert.ok(burst.every((h) => h.rex_reachable === true));
     assert.equal(probes(), 1, "20 concurrent hits -> 1 rex call");
@@ -134,30 +134,47 @@ test("send_keys accepts Rex key names", async () => {
   await client.close();
 });
 
-test("send_message: text goes over stdin, then enter; session resolved from block", async () => {
+test("send_message: delivers the exact text as one paste event (JSON on stdin), then enter", async () => {
   const client = await connect(bridge.url);
-  const text = "--not-a-flag\nline two";
+  const text = "--not-a-flag\nline two with \"quotes\" and $(subshell)\nhéllo 世界 🎉\n\tindented " + "x".repeat(3000);
+  const before = bridge.fake.pastes().length;
   const r = await call(client, "send_message", { block_id: B2, text });
   assert.equal(r.isError, false, r.text);
-  const send = bridge.fake.callsOf("send").at(-1)!;
-  assert.deepEqual(send.args, ["send", "-s", S1, "-b", B2]);
-  assert.equal(send.input, text);
-  assert.deepEqual(bridge.fake.callsOf("send-key").at(-1)!.args, ["send-key", "-s", S1, "-b", B2, "--", "enter"]);
+  const pastes = bridge.fake.pastes();
+  assert.equal(pastes.length, before + 1);
+  assert.deepEqual(pastes.at(-1), { session_id: S1, block_id: B2, event: { type: "paste", payload: { text } } });
+  const pasteCall = bridge.fake.calls.findLast((c) => c.args[2] === "block.event")!;
+  assert.deepEqual(pasteCall.args, ["api", "call", "block.event", "-"], "text is never in argv");
+  // enter comes after the paste
+  const iPaste = bridge.fake.calls.lastIndexOf(pasteCall);
+  const enter = bridge.fake.calls.slice(iPaste + 1).find((c) => c.args[0] === "send-key")!;
+  assert.deepEqual(enter.args, ["send-key", "-s", S1, "-b", B2, "--", "enter"]);
+  assert.equal(bridge.fake.callsOf("send").length, 0, "raw keystroke `rex send` is not used");
+  await client.close();
+});
+
+test("send_message submit=false pastes without enter", async () => {
+  const client = await connect(bridge.url);
+  const keysBefore = bridge.fake.callsOf("send-key").length;
+  const r = await call(client, "send_message", { block_id: B2, session_id: S1, text: "draft", submit: false });
+  assert.equal(r.isError, false, r.text);
+  assert.equal(bridge.fake.pastes().at(-1)!.event.payload.text, "draft");
+  assert.equal(bridge.fake.callsOf("send-key").length, keysBefore);
   await client.close();
 });
 
 test("send_message require_idle refuses while working, allows when idle", async () => {
   const client = await connect(bridge.url);
-  const sendsBefore = bridge.fake.callsOf("send").length;
+  const sendsBefore = bridge.fake.pastes().length;
   bridge.fake.state = "working";
   const refused = await call(client, "send_message", { block_id: B1, session_id: S1, text: "hi", require_idle: true });
   assert.equal(refused.isError, true);
   assert.match(refused.text, /refused: pane .* is working/);
-  assert.equal(bridge.fake.callsOf("send").length, sendsBefore, "nothing sent");
+  assert.equal(bridge.fake.pastes().length, sendsBefore, "nothing sent");
   bridge.fake.state = "idle";
   const ok = await call(client, "send_message", { block_id: B1, session_id: S1, text: "hi", require_idle: true });
   assert.equal(ok.isError, false, ok.text);
-  assert.equal(bridge.fake.callsOf("send").length, sendsBefore + 1);
+  assert.equal(bridge.fake.pastes().length, sendsBefore + 1);
   await client.close();
 });
 
