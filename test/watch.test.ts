@@ -42,6 +42,40 @@ test("file round-trip with comments leaves the file byte-identical and keeps its
   assert.deepEqual(await readdir(dir), ["sessions"], "no temp files left behind");
 });
 
+test("concurrent adds/removes from separate instances never lose an update", async () => {
+  const dir = await tempDir();
+  const path = join(dir, "sessions");
+  const header = "# keep this comment\n";
+  await writeFile(path, header);
+  const ids = Array.from({ length: 25 }, (_, i) => `session:0000-${String(i).padStart(4, "0")}`);
+  // A fresh WatchFile per call, like the per-request MCP servers.
+  const results = await Promise.all(ids.map((id) => new WatchFile(path).add(id)));
+  assert.ok(results.every((r) => r === true));
+  assert.deepEqual((await new WatchFile(path).list()).sort(), [...ids].sort());
+
+  const toRemove = ids.filter((_, i) => i % 2 === 0);
+  await Promise.all([
+    ...toRemove.map((id) => new WatchFile(path).remove(id)),
+    new WatchFile(join(dir, ".", "sessions")).add("session:extra-0000"),
+  ]);
+  const left = await new WatchFile(path).list();
+  assert.deepEqual(left.sort(), [...ids.filter((_, i) => i % 2 === 1), "session:extra-0000"].sort());
+  assert.ok((await readFile(path, "utf8")).startsWith(header));
+  assert.deepEqual(await readdir(dir), ["sessions"], "no temp files left behind");
+});
+
+test("a failed update does not block later ones", async () => {
+  const dir = await tempDir();
+  const path = join(dir, "sessions");
+  await writeFile(path, "");
+  const w = new WatchFile(path);
+  await chmod(dir, 0o500); // read-only dir: temp file creation fails
+  await assert.rejects(w.add(A));
+  await chmod(dir, 0o700);
+  assert.equal(await w.add(B), true);
+  assert.deepEqual(await w.list(), [B]);
+});
+
 test("empty file round-trip stays empty; missing file reads as empty", async () => {
   const dir = await tempDir();
   const path = join(dir, "sessions");

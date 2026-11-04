@@ -14,6 +14,8 @@ export class BridgeError extends Error {
 export const AGENTS = ["claude", "codex", "pi", "grok", "shell", "custom"] as const;
 export type Agent = (typeof AGENTS)[number];
 
+const REACH_TTL_MS = 5_000;
+
 /** Default terminal states for wait_for_status. */
 export const SETTLED_STATES = ["done", "blocked", "error", "idle"];
 
@@ -244,11 +246,21 @@ export class Ops {
     }
   }
 
-  async rexReachable(): Promise<boolean> {
-    return this.rex.version().then(
+  private reach: { at: number; value: Promise<boolean> } | null = null;
+
+  /**
+   * Used by the unauthenticated /healthz: the result is cached for 5s and concurrent callers share one
+   * in-flight probe, so health checks can never fan out into unbounded rex subprocesses.
+   */
+  rexReachable(): Promise<boolean> {
+    const now = this.now();
+    if (this.reach && now - this.reach.at < REACH_TTL_MS) return this.reach.value;
+    const value = this.rex.version().then(
       () => true,
       () => false,
     );
+    this.reach = { at: now, value };
+    return value;
   }
 
   async bridgeStatus() {

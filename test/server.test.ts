@@ -52,6 +52,24 @@ test("healthz needs no auth and returns only ok/rex_reachable/heartbeat", async 
   assert.equal(body.rex_reachable, true);
 });
 
+test("healthz caches the rex probe for 5s and coalesces concurrent hits into one subprocess", async () => {
+  const b = await startBridge();
+  try {
+    const probes = () => b.fake.calls.filter((c) => c.args[0] === "api").length;
+    const burst = await Promise.all(Array.from({ length: 20 }, () => fetch(b.url + "/healthz").then((r) => r.json())));
+    assert.ok(burst.every((h) => h.rex_reachable === true));
+    assert.equal(probes(), 1, "20 concurrent hits -> 1 rex call");
+    b.clock.t += 4_000;
+    await fetch(b.url + "/healthz");
+    assert.equal(probes(), 1, "still cached at 4s");
+    b.clock.t += 2_000;
+    await fetch(b.url + "/healthz");
+    assert.equal(probes(), 2, "re-probed after 5s");
+  } finally {
+    await b.close();
+  }
+});
+
 test("unknown path -> 404", async () => {
   assert.equal((await fetch(bridge.url + "/other")).status, 404);
 });

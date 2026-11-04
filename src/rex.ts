@@ -34,37 +34,46 @@ export class RexError extends Error {
 }
 
 /** Spawns the real `rex` binary. No shell is involved: args are passed as an argv array. */
-export function spawnRunner(bin: string, defaultTimeoutMs = 15_000): Runner {
+export function spawnRunner(bin: string, defaultTimeoutMs = 15_000, maxOutput = MAX_OUTPUT): Runner {
   return (args, opts = {}) =>
     new Promise((resolve, reject) => {
       const child = spawn(bin, args, { stdio: ["pipe", "pipe", "pipe"], shell: false });
-      let stdout = "";
-      let stderr = "";
+      // Keep raw Buffers and decode once at the end, so multibyte characters split across chunks survive.
+      const out: Buffer[] = [];
+      const err: Buffer[] = [];
       let size = 0;
       let timedOut = false;
+      let overflow = false;
       const timer = setTimeout(() => {
         timedOut = true;
         child.kill("SIGKILL");
       }, opts.timeoutMs ?? defaultTimeoutMs);
-      const onData = (which: "out" | "err") => (chunk: Buffer) => {
+      const onData = (sink: Buffer[]) => (chunk: Buffer) => {
+        if (overflow) return;
         size += chunk.length;
-        if (size > MAX_OUTPUT) {
+        if (size > maxOutput) {
+          overflow = true;
           child.kill("SIGKILL");
           return;
         }
-        if (which === "out") stdout += chunk.toString("utf8");
-        else stderr += chunk.toString("utf8");
+        sink.push(chunk);
       };
-      child.stdout.on("data", onData("out"));
-      child.stderr.on("data", onData("err"));
-      child.on("error", (err) => {
+      child.stdout.on("data", onData(out));
+      child.stderr.on("data", onData(err));
+      child.on("error", (e) => {
         clearTimeout(timer);
-        reject(new RexError(`failed to start rex (${bin}): ${err.message}`, args, null, ""));
+        reject(new RexError(`failed to start rex (${bin}): ${e.message}`, args, null, ""));
       });
       child.on("close", (code) => {
         clearTimeout(timer);
+        const stdout = Buffer.concat(out).toString("utf8");
+        const stderr = Buffer.concat(err).toString("utf8");
         if (timedOut) {
           reject(new RexError(`rex ${args[0] ?? ""} timed out`, args, null, stderr));
+          return;
+        }
+        if (overflow) {
+          reject(new RexError(`rex ${args[0] ?? ""} output exceeded ${maxOutput} bytes`, args, null, ""));
           return;
         }
         resolve({ stdout, stderr, code: code ?? 1 });

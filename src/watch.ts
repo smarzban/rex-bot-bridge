@@ -1,5 +1,5 @@
 import { readFile, rename, stat, writeFile, mkdir, unlink } from "node:fs/promises";
-import { dirname, join, basename } from "node:path";
+import { dirname, join, basename, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 
 /**
@@ -33,6 +33,24 @@ export function removeWatched(content: string, id: string): string {
     .join("\n");
 }
 
+/**
+ * One promise chain per file path, shared by every WatchFile instance in the process, so concurrent
+ * read/modify/write updates (parallel tool calls, each with its own MCP server) never lose an edit.
+ */
+const locks = new Map<string, Promise<unknown>>();
+
+function withLock<T>(file: string, fn: () => Promise<T>): Promise<T> {
+  const path = resolve(file);
+  const prev = locks.get(path) ?? Promise.resolve();
+  const run = prev.then(fn);
+  const tail = run.catch(() => {});
+  locks.set(path, tail);
+  void tail.then(() => {
+    if (locks.get(path) === tail) locks.delete(path);
+  });
+  return run;
+}
+
 export class WatchFile {
   constructor(readonly path: string) {}
 
@@ -58,12 +76,14 @@ export class WatchFile {
     return this.update((c) => removeWatched(c, id));
   }
 
-  private async update(fn: (content: string) => string): Promise<boolean> {
-    const before = await this.read();
-    const after = fn(before);
-    if (after === before) return false;
-    await atomicWrite(this.path, after);
-    return true;
+  private update(fn: (content: string) => string): Promise<boolean> {
+    return withLock(this.path, async () => {
+      const before = await this.read();
+      const after = fn(before);
+      if (after === before) return false;
+      await atomicWrite(this.path, after);
+      return true;
+    });
   }
 }
 
