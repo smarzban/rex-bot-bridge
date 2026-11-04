@@ -2,6 +2,7 @@ import { stat, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 import { Rex, type ProcessInfo, type StatusRecord } from "./rex.js";
+import type { Mode } from "./settings.js";
 import { WatchFile } from "./watch.js";
 
 export class BridgeError extends Error {
@@ -46,7 +47,12 @@ export interface OpsDeps {
   pollMs?: number;
   /** Delay between a paste and the Enter that submits it (default 150ms). */
   pasteSettleMs?: number;
+  /** Powers: "watched" limits pane/session tools to watched sessions. Read per call. Default "full". */
+  mode?: () => Promise<Mode>;
 }
+
+export const OPT_IN_HINT =
+  'Ask the human to opt it in (Rex command palette "Bot: Watch / Unwatch This Session", or `rex-bot watch add <session_id>`)';
 
 /** Runs fn over items with at most `limit` in flight. */
 async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> {
@@ -72,8 +78,10 @@ export class Ops {
   private readonly now: () => number;
   private readonly pollMs: number;
   private readonly pasteSettleMs: number;
+  private readonly mode: () => Promise<Mode>;
 
   constructor(private readonly deps: OpsDeps) {
+    this.mode = deps.mode ?? (async () => "full");
     this.rex = deps.rex;
     this.watch = deps.watch;
     this.sleep = deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
@@ -91,6 +99,33 @@ export class Ops {
       if (blocks?.some((b) => b.block_id === blockId)) return s.session_id;
     }
     throw new BridgeError(`block ${blockId} not found in any session`);
+  }
+
+  /** In watched mode, refuses unless the session is on the watch list. */
+  private async gateSession(tool: string, sessionId: string): Promise<void> {
+    if ((await this.mode()) === "full") return;
+    if ((await this.watch.list()).includes(sessionId)) return;
+    throw new BridgeError(
+      `${tool} refused: the bridge is in "watched" mode and session ${sessionId} is not watched. ${OPT_IN_HINT}. ` +
+        "The Mac's owner can allow every session with `rex-bot config set mode full`.",
+    );
+  }
+
+  /**
+   * Session that owns blockId, gated. In watched mode a caller-supplied session_id is verified to really
+   * own the block, so a watched session id cannot be paired with a block from an unwatched one.
+   */
+  private async target(tool: string, blockId: string, sessionId?: string): Promise<string> {
+    const session = await this.resolveSession(blockId, sessionId);
+    if ((await this.mode()) === "full") return session;
+    if (sessionId) {
+      const blocks = await this.rex.blocks(session).catch(() => []);
+      if (!blocks.some((b) => b.block_id === blockId)) {
+        throw new BridgeError(`block ${blockId} is not in session ${sessionId}`);
+      }
+    }
+    await this.gateSession(tool, session);
+    return session;
   }
 
   async listAgents(filterSession?: string): Promise<{ sessions: SessionInfo[] }> {
@@ -124,7 +159,7 @@ export class Ops {
   }
 
   async readPane(blockId: string, sessionId: string | undefined, lines: number) {
-    const session = await this.resolveSession(blockId, sessionId);
+    const session = await this.target("read_pane", blockId, sessionId);
     const text = await this.rex.capture(session, blockId);
     const all = text.replace(/\n$/, "").split("\n");
     const tail = all.slice(-lines);
@@ -138,7 +173,7 @@ export class Ops {
     submit: boolean;
     require_idle: boolean;
   }) {
-    const session = await this.resolveSession(opts.block_id, opts.session_id);
+    const session = await this.target("send_message", opts.block_id, opts.session_id);
     if (opts.require_idle) {
       const st = await this.rex.status(session, opts.block_id);
       if (st?.state === "working") {
@@ -158,7 +193,7 @@ export class Ops {
   }
 
   async sendKeys(blockId: string, sessionId: string | undefined, keys: string[]) {
-    const session = await this.resolveSession(blockId, sessionId);
+    const session = await this.target("send_keys", blockId, sessionId);
     await this.rex.sendKeys(session, blockId, keys);
     return { session_id: session, block_id: blockId, keys };
   }
@@ -179,6 +214,8 @@ export class Ops {
     if (!opts.session_id && !opts.new_session_label) {
       throw new BridgeError("give session_id (new tab in that session) or new_session_label (new session)");
     }
+    const watchedMode = (await this.mode()) === "watched";
+    if (opts.session_id) await this.gateSession("spawn_agent", opts.session_id);
     const cwd = expandHome(opts.cwd);
     if (!isAbsolute(cwd)) throw new BridgeError(`cwd must be an absolute path (or start with ~): ${opts.cwd}`);
     const st = await stat(cwd).catch(() => null);
@@ -195,7 +232,8 @@ export class Ops {
       if (opts.label) await this.rex.renameBlock(res.session_id, res.block_id, opts.label);
     }
     let watched = false;
-    if (opts.watch) {
+    // In watched mode a new session is always watched, or the bot could not reach the agent it just spawned.
+    if (opts.watch || (watchedMode && opts.new_session_label)) {
       await this.watch.add(res.session_id);
       watched = true;
     }
@@ -203,7 +241,7 @@ export class Ops {
   }
 
   async waitForStatus(blockId: string, sessionId: string | undefined, states: string[], timeoutS: number) {
-    const session = await this.resolveSession(blockId, sessionId);
+    const session = await this.target("wait_for_status", blockId, sessionId);
     const deadline = this.now() + timeoutS * 1000;
     let last: StatusRecord | null = null;
     for (;;) {
@@ -219,18 +257,24 @@ export class Ops {
   }
 
   async closePane(blockId: string, sessionId?: string) {
-    const session = await this.resolveSession(blockId, sessionId);
+    const session = await this.target("close_pane", blockId, sessionId);
     await this.rex.closeBlock(session, blockId);
     return { session_id: session, block_id: blockId, closed: true };
   }
 
   async closeSession(sessionId: string) {
+    await this.gateSession("close_session", sessionId);
     await this.rex.killSession(sessionId);
     const unwatched = await this.watch.remove(sessionId);
     return { session_id: sessionId, closed: true, removed_from_watch_list: unwatched };
   }
 
   async watchSession(sessionId: string) {
+    if ((await this.mode()) === "watched") {
+      throw new BridgeError(
+        `watch_session refused: the bridge is in "watched" mode, where only the human adds sessions. ${OPT_IN_HINT}.`,
+      );
+    }
     const changed = await this.watch.add(sessionId);
     return { session_id: sessionId, watched: true, changed };
   }
@@ -272,12 +316,14 @@ export class Ops {
   }
 
   async bridgeStatus() {
-    const [version, heartbeat, watched] = await Promise.all([
+    const [version, heartbeat, watched, mode] = await Promise.all([
       this.rex.version().catch((e: Error) => ({ error: e.message })),
       this.heartbeatAgeS(),
       this.watch.list().catch(() => []),
+      this.mode(),
     ]);
     return {
+      mode,
       rex: version,
       watcher_heartbeat_age_s: heartbeat,
       watched_count: watched.length,
