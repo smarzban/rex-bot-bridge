@@ -11,7 +11,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 const base = process.argv[2] || "http://127.0.0.1:7400";
 const tokenFile = process.env.REX_BRIDGE_TOKEN_FILE || join(homedir(), ".config/rex-bot-bridge/token");
 const token = readFileSync(tokenFile, "utf8").trim();
-const watchFile = join(process.env.REX_BOT_WATCH_DIR || join(homedir(), ".config/rex/bot-watch"), "sessions");
+const watchFile = join(process.env.REX_BOT_DIR || join(homedir(), ".config/rex-bot-bridge"), "watched");
 const readWatch = () => {
   try {
     return readFileSync(watchFile, "utf8");

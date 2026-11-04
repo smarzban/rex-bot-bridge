@@ -13,6 +13,9 @@ import { WatchFile } from "../src/watch.js";
 export const S1 = "session:01a1a7e9-0000-7000-8000-000000000001";
 export const B1 = "block:01a1a7e9-0000-7000-8000-0000000000b1";
 export const B2 = "block:01a1a7e9-0000-7000-8000-0000000000b2";
+/** A second session, not on the watch list, with one pane. */
+export const S2 = "session:01a1a7e9-0000-7000-8000-000000000002";
+export const B3 = "block:01a1a7e9-0000-7000-8000-0000000000b3";
 export const TOKEN = "test-token-abcdefghijklmnopqrstuvwxyz0123456789";
 
 export interface Call {
@@ -32,7 +35,9 @@ export class FakeRex {
     const key = args.slice(0, 2).join(" ");
     if (key === "api call" && args[2] === "server.version") return ok({ rex_version: "0.0.test", api_revision: 10 });
     if (key === "api call" && args[2] === "block.event") return ok({});
-    if (key === "ls --json") return ok({ sessions: [{ session_id: S1, label: "work" }] });
+    if (key === "ls --json") return ok({ sessions: [{ session_id: S1, label: "work" }, { session_id: S2, label: "other" }] });
+    if (key === "block ls" && args[args.indexOf("-s") + 1] === S2)
+      return ok({ blocks: [{ block_id: B3, label: "other", window_id: "window:w2" }] });
     if (key === "block ls")
       return ok({
         blocks: [
@@ -43,10 +48,10 @@ export class FakeRex {
     if (key === "session inspect") return ok({ windows: [{ window_id: "window:w1", label: "main" }] });
     if (key === "block call") {
       const block = args[args.indexOf("-b") + 1];
-      if (block !== B1 && block !== B2) return { stdout: "", stderr: `Error: block target "${block}" not found`, code: 3 };
+      if (block !== B1 && block !== B2 && block !== B3) return { stdout: "", stderr: `Error: block target "${block}" not found`, code: 3 };
       if (args.at(-1) === "process")
         return ok({ foreground: { pid: 42, name: "2.1.318", argv0: "claude", cwd: "/work" } });
-      if (block === B2) return ok({ records: [] });
+      if (block === B2 || block === B3) return ok({ records: [] });
       const st = this.statusSequence.length ? this.statusSequence.shift()! : this.state;
       return ok({ records: st ? [{ state: st, app: "claude-code", msg: "thinking", owner: { pid: 1 } }] : [] });
     }
@@ -78,7 +83,7 @@ export async function tempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "rex-bridge-test-"));
 }
 
-export async function startBridge(fake = new FakeRex()) {
+export async function startBridge(fake = new FakeRex(), mode: "watched" | "full" = "full") {
   const dir = await tempDir();
   const watchPath = join(dir, "sessions");
   await writeFile(watchPath, "# watched sessions\n\n" + S1 + "  # main\n");
@@ -95,6 +100,7 @@ export async function startBridge(fake = new FakeRex()) {
       clock.t += ms;
     },
     pollMs: 1000,
+    mode: async () => mode,
   });
   const server = createBridgeHttpServer({ ops, audit: new AuditLog(auditPath), getToken: async () => TOKEN });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
