@@ -18,7 +18,8 @@
     "test": "node --import tsx --test 'test/**/*.test.ts'",
     "start": "node dist/cli/bridge.js serve",
     "dev": "tsx src/cli/bridge.ts serve",
-    "token": "tsx src/cli/bridge.ts token"
+    "token": "tsx src/cli/bridge.ts token",
+    "e2e": "node scripts/e2e.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
