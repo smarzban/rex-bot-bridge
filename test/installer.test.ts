@@ -373,3 +373,27 @@ test("tailscale: serveTarget reads the :443 handler for the path", async () => {
   const empty: Runner = async () => ({ stdout: "{}", stderr: "", code: 0 });
   assert.equal(await serveTarget(empty, "/rex-bridge"), null);
 });
+
+test("launchd uninstall: only boots out services whose plist is in this HOME", async () => {
+  const { uninstallServices, installServices, LABELS } = await import("../src/launchd.js");
+  const home = await tempDir();
+  const paths = resolvePaths({ HOME: home });
+  const calls: string[][] = [];
+  const launchctl: Runner = async (args) => {
+    calls.push(args);
+    return { stdout: "", stderr: "", code: 0 };
+  };
+  assert.deepEqual(await uninstallServices(paths, launchctl), []);
+  assert.equal(calls.length, 0, "no launchctl calls without our plists");
+
+  await installServices({ paths, node: "/n", cli: "/c.js", rexBin: "/r/rex", pkgRoot: "/p" }, launchctl);
+  assert.deepEqual(
+    calls.map((c) => c[0]),
+    ["bootout", "bootstrap", "bootout", "bootstrap"],
+  );
+  assert.equal(calls[1]![2], join(home, `Library/LaunchAgents/${LABELS.bridge}.plist`));
+  calls.length = 0;
+  assert.deepEqual(await uninstallServices(paths, launchctl), [LABELS.bridge, LABELS.watch]);
+  assert.deepEqual(calls.map((c) => c[0]), ["bootout", "bootout"]);
+  await assert.rejects(stat(join(home, `Library/LaunchAgents/${LABELS.bridge}.plist`)));
+});

@@ -107,20 +107,22 @@ export async function installServices(ctx: ServiceContext, launchctl: Runner): P
   return done;
 }
 
+/**
+ * Boots out and deletes the services whose plist is in this HOME's LaunchAgents. A label without our plist
+ * is left alone (so an uninstall with a different HOME, e.g. a test sandbox, never stops real services).
+ */
 export async function uninstallServices(paths: Paths, launchctl: Runner): Promise<string[]> {
   const removed: string[] = [];
   for (const label of Object.values(LABELS)) {
     const path = plistPath(paths, label);
-    const r = await launchctl(["bootout", `${domain()}/${label}`]);
-    let existed = r.code === 0;
-    try {
-      await readFile(path);
-      await rm(path);
-      existed = true;
-    } catch {
-      /* not there */
-    }
-    if (existed) removed.push(label);
+    const exists = await readFile(path).then(
+      () => true,
+      () => false,
+    );
+    if (!exists) continue;
+    await launchctl(["bootout", `${domain()}/${label}`]);
+    await rm(path, { force: true });
+    removed.push(label);
   }
   return removed;
 }
