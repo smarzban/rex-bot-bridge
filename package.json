@@ -1,0 +1,32 @@
+{
+  "name": "rex-bot-bridge",
+  "version": "0.1.0",
+  "description": "MCP server that lets a remote coordinator (Grok Bot over Tailscale) see and drive agent sessions in Rex",
+  "type": "module",
+  "license": "UNLICENSED",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "rex-bot-bridge": "dist/cli/bridge.js",
+    "rex-bot": "dist/cli/rex-bot.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test 'test/**/*.test.ts'",
+    "start": "node dist/cli/bridge.js serve",
+    "dev": "tsx src/cli/bridge.ts serve",
+    "token": "tsx src/cli/bridge.ts token"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
