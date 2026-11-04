@@ -36,7 +36,7 @@ delete env.REX_BOT_DIR;
 await mkdir(join(SB, ".config/rex"), { recursive: true });
 await mkdir(join(SB, ".claude"));
 await mkdir(join(SB, ".agents"));
-const userInit = '-- the user\'s own config\nrex.bind("cmd+shift+e2e", "pane.split")\n';
+const userInit = '-- the user\'s own config\nlocal e2e_marker = true\n';
 await writeFile(join(SB, ".config/rex/init.lua"), userInit);
 // A v1 opt-in list to migrate.
 await mkdir(join(SB, ".config/rex/bot-watch"), { recursive: true });
@@ -193,7 +193,8 @@ try {
     check(st.body.source === "rex" && !!st.body.host && !!st.body.timestamp, "payload enriched with source/host/timestamp");
   }
   // The unwatched session must stay silent.
-  await run(REX, ["send", "-s", otherS.session_id, "-b", otherS.block_id, "--", "printf '\\033]7501;state=done:app=e2e-other\\033\\\\'\n"]).catch(() => {});
+  const otherSend = await run(REX, ["send", "-s", otherS.session_id, "-b", otherS.block_id, "--", "printf '\\033]7501;state=done:app=e2e-other\\033\\\\'\n"]).then(() => 0, (e) => e.code ?? 1);
+  check(otherSend === 0, "OSC 7501 done sent into the unwatched session too");
   await sleep(5000);
   check(!received.some((r) => r.body?.rex_session === otherS.session_id), "no agent_status for the unwatched session");
 
