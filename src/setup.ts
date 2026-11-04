@@ -197,7 +197,7 @@ export async function setup(ctx: Ctx, flags: SetupFlags, p: Prompter): Promise<n
   if (flags.services) {
     try {
       const labels = await installServices(
-        { paths, node: ctx.node, cli: ctx.cli, rexBin: ctx.rexBin, pkgRoot: ctx.pkgRoot },
+        { paths, node: ctx.node, cli: ctx.cli, rexBin: ctx.rexBin, pkgRoot: ctx.pkgRoot, rexServer: ctx.env.REX_SERVER },
         ctx.launchctl,
       );
       ok(`Services installed and started: ${labels.join(", ")} (logs: ${paths.logsDir})`);

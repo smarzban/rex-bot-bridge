@@ -9,7 +9,7 @@
 import { spawn, execFile } from "node:child_process";
 import { mkdtemp, mkdir, readFile, writeFile, readdir, stat } from "node:fs/promises";
 import { createServer } from "node:http";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -31,8 +31,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // ---- sandbox ----
 const SB = await mkdtemp(join(tmpdir(), "rex-bot-sandbox-"));
 const env = { ...process.env, HOME: SB, XDG_CONFIG_HOME: join(SB, ".config") };
-delete env.REX_CONFIG;
-delete env.REX_BOT_DIR;
+// Like launchd: no Rex pane context. rex finds its server socket via HOME, which is the sandbox here, so
+// point it at the real server explicitly (what the generated plists do when setup knows REX_SERVER).
+const REAL_SOCK = `unix://${encodeURI(join(homedir(), "Library/Application Support/rex/server.sock"))}`;
+for (const k of ["REX_CONFIG", "REX_BOT_DIR", "REX_SESSION", "REX_BLOCK"]) delete env[k];
+env.REX_SERVER = process.env.REX_SERVER || REAL_SOCK;
 await mkdir(join(SB, ".config/rex"), { recursive: true });
 await mkdir(join(SB, ".claude"));
 await mkdir(join(SB, ".agents"));

@@ -47,6 +47,8 @@ export interface ServiceContext {
   cli: string;
   rexBin: string;
   pkgRoot: string;
+  /** The Rex server address setup itself used (REX_SERVER), passed on so services reach the same server. */
+  rexServer?: string;
 }
 
 /** PATH for services: rex's dir and node's dir first, then the usual system dirs. */
@@ -61,6 +63,7 @@ export function serviceSpecs(ctx: ServiceContext): Record<Service, PlistSpec> {
     PATH: servicePath(ctx),
     REX_BIN: ctx.rexBin,
     REX_BOT_DIR: ctx.paths.stateDir,
+    ...(ctx.rexServer ? { REX_SERVER: ctx.rexServer } : {}),
   };
   return {
     bridge: {

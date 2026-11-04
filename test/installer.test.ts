@@ -181,7 +181,9 @@ test("plists: paths with spaces and XML specials are escaped and pass plutil -li
     cli: "/lib/node_modules/rex-bot-bridge/dist/cli/rex-bot.js",
     rexBin,
     pkgRoot: "/lib/node_modules/rex-bot-bridge",
+    rexServer: "unix:///Users/x/Library/Application%20Support/rex/server.sock",
   });
+  assert.equal(specs.watch.env.REX_SERVER, "unix:///Users/x/Library/Application%20Support/rex/server.sock");
   assert.deepEqual(specs.bridge.programArguments.slice(1), ["/lib/node_modules/rex-bot-bridge/dist/cli/rex-bot.js", "serve"]);
   assert.deepEqual(specs.watch.programArguments.slice(1), ["/lib/node_modules/rex-bot-bridge/dist/cli/rex-bot.js", "watch"]);
   assert.equal(specs.bridge.env.REX_BIN, rexBin);
