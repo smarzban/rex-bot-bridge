@@ -75,13 +75,18 @@ export async function startBridge(fake = new FakeRex()) {
   const watchPath = join(dir, "sessions");
   await writeFile(watchPath, "# watched sessions\n\n" + S1 + "  # main\n");
   const auditPath = join(dir, "audit.log");
+  // Fake clock: sleeping advances time instantly, so timeout paths run without real waiting.
+  const clock = { t: 1_000_000 };
   const ops = new Ops({
     rex: new Rex(fake.runner),
     watch: new WatchFile(watchPath),
     heartbeatFile: join(dir, "heartbeat"),
     auditLogPath: auditPath,
-    sleep: async () => {},
-    pollMs: 1,
+    now: () => clock.t,
+    sleep: async (ms) => {
+      clock.t += ms;
+    },
+    pollMs: 1000,
   });
   const server = createBridgeHttpServer({ ops, audit: new AuditLog(auditPath), getToken: async () => TOKEN });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
@@ -92,6 +97,7 @@ export async function startBridge(fake = new FakeRex()) {
     dir,
     watchPath,
     auditPath,
+    clock,
     url,
     close: () => new Promise<void>((r) => server.close(() => r())),
   };

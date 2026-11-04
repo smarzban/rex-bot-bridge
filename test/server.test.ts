@@ -166,8 +166,13 @@ test("wait_for_status returns once a target state is reached, or times out", asy
   assert.equal(r.json.timed_out, false);
   assert.equal(r.json.status.state, "done");
   bridge.fake.state = "working";
-  const t = await call(client, "wait_for_status", { block_id: B1, session_id: S1, timeout_s: 1 });
+  const startClock = bridge.clock.t;
+  const wallStart = Date.now();
+  const t = await call(client, "wait_for_status", { block_id: B1, session_id: S1, timeout_s: 600 });
   assert.equal(t.json.timed_out, true);
+  assert.equal(t.json.status.state, "working", "last record seen is returned");
+  assert.equal(bridge.clock.t - startClock, 600_000, "waited exactly the timeout on the fake clock");
+  assert.ok(Date.now() - wallStart < 2000, "no real waiting");
   bridge.fake.state = "idle";
   await client.close();
 });
@@ -229,8 +234,47 @@ test("audit log records calls, truncates text, never contains the token", async 
   assert.ok(last.timestamp);
 });
 
-test("fake runner sanity: unknown command is surfaced as an error", async () => {
+test("audit log records failed calls with ok=false and the error", async () => {
+  const client = await connect(bridge.url);
+  const missing = "block:01a1a7e9-ffff-7000-8000-fffffffffff0";
+  const r = await call(client, "close_pane", { block_id: missing });
+  assert.equal(r.isError, true);
+  await client.close();
+  const last = JSON.parse((await readFile(bridge.auditPath, "utf8")).trim().split("\n").at(-1)!);
+  assert.equal(last.tool, "close_pane");
+  assert.equal(last.ok, false);
+  assert.match(last.error, /not found in any session/);
+  assert.equal(last.args.block_id, missing);
+});
+
+test("audit log truncates array args (custom command argv)", async () => {
+  const client = await connect(bridge.url);
+  const command = ["sh", "-c", "z".repeat(1000), ...Array.from({ length: 30 }, (_, i) => `a${i}`)];
+  const r = await call(client, "spawn_agent", { agent: "custom", cwd: "/tmp", session_id: S1, command, watch: false });
+  assert.equal(r.isError, false, r.text);
+  await client.close();
+  const last = JSON.parse((await readFile(bridge.auditPath, "utf8")).trim().split("\n").at(-1)!);
+  assert.equal(last.tool, "spawn_agent");
+  assert.equal(last.args.command.length, 21, "20 items + overflow marker");
+  assert.ok(last.args.command[2].length < 220);
+  assert.match(last.args.command[20], /\+13 more/);
+  // the real call still got the full argv
+  assert.equal(bridge.fake.callsOf("run").at(-1)!.args.at(-1), "a29");
+});
+
+test("a failing rex call surfaces as a tool error with rex's message", async () => {
   const fake = new FakeRex();
-  const r = await fake.runner(["bogus"]);
-  assert.equal(r.code, 1);
+  const orig = fake.runner;
+  fake.runner = async (args, opts) =>
+    args[0] === "capture" ? { stdout: "", stderr: "Error: terminal is gone\nmore detail", code: 2 } : orig(args, opts);
+  const b = await startBridge(fake);
+  try {
+    const client = await connect(b.url);
+    const r = await call(client, "read_pane", { block_id: B1, session_id: S1 });
+    assert.equal(r.isError, true);
+    assert.match(r.text, /rex capture -s failed: Error: terminal is gone$/);
+    await client.close();
+  } finally {
+    await b.close();
+  }
 });

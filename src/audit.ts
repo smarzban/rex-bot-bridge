@@ -10,13 +10,25 @@ export interface AuditEntry {
 }
 
 const MAX_TEXT = 200;
+const MAX_ITEMS = 20;
 
-/** Copy of args safe to log: long strings (e.g. message text, prompts) are truncated. */
+function truncate(s: string): string {
+  return s.length > MAX_TEXT ? s.slice(0, MAX_TEXT) + `…(+${s.length - MAX_TEXT})` : s;
+}
+
+/**
+ * Copy of args safe to log: long strings (message text, prompts) are truncated, and so are arrays
+ * (e.g. a custom command argv): each element is truncated, and at most 20 elements are kept.
+ */
 export function redactArgs(args: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(args ?? {})) {
-    if (typeof v === "string" && v.length > MAX_TEXT) out[k] = v.slice(0, MAX_TEXT) + `…(+${v.length - MAX_TEXT})`;
-    else out[k] = v;
+    if (typeof v === "string") out[k] = truncate(v);
+    else if (Array.isArray(v)) {
+      const items = v.slice(0, MAX_ITEMS).map((x) => (typeof x === "string" ? truncate(x) : x));
+      if (v.length > MAX_ITEMS) items.push(`…(+${v.length - MAX_ITEMS} more)`);
+      out[k] = items;
+    } else out[k] = v;
   }
   return out;
 }

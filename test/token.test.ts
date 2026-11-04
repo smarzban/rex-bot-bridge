@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { stat, writeFile, chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { bearer, ensureToken, readToken, tokenMatches } from "../src/token.js";
-import { redactArgs } from "../src/audit.js";
+import { AuditLog, redactArgs } from "../src/audit.js";
 import { tempDir } from "./helpers.js";
 
 test("ensureToken creates a 43-char base64url token with mode 600, then reuses it", async () => {
@@ -44,4 +44,21 @@ test("audit redaction truncates long strings to 200 chars", () => {
   assert.ok((r.text as string).length < 220);
   assert.equal(r.block_id, "block:1");
   assert.equal(r.n, 3);
+});
+
+test("audit write failure is reported, never thrown", async () => {
+  const dir = await tempDir();
+  const blocker = join(dir, "file");
+  await writeFile(blocker, "x");
+  const log = new AuditLog(join(blocker, "sub", "audit.log")); // parent is a file: mkdir fails
+  const errors: string[] = [];
+  const orig = console.error;
+  console.error = (m: string) => errors.push(m);
+  try {
+    await log.write({ tool: "t", args: {}, ok: true, duration_ms: 1 });
+  } finally {
+    console.error = orig;
+  }
+  assert.equal(errors.length, 1);
+  assert.match(errors[0]!, /audit log write failed/);
 });
