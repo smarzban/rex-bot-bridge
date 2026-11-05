@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
@@ -29,6 +29,7 @@ Install and check:
   rex-bot doctor [--json] [--test-webhook]
   rex-bot uninstall [--yes] [--purge] [--serve-off]
   rex-bot grokbot [--show-token]      print the Grok Bot setup text again
+  rex-bot --version                   print the installed version
 
 Settings (~/.config/rex-bot-bridge):
   rex-bot config get <key> [--show]   keys: ${KEYS.join(", ")}
@@ -238,11 +239,21 @@ async function grokbotCmd(showToken: boolean): Promise<number> {
   return 0;
 }
 
+/** The version in package.json (same relative path from src/cli and dist/cli). */
+export function packageVersion(): string {
+  const pkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as { version: string };
+  return pkg.version;
+}
+
 export async function main(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;
   if (!cmd || cmd === "-h" || cmd === "--help" || cmd === "help") {
     (cmd ? console.log : console.error)(USAGE);
     return cmd ? 0 : 2;
+  }
+  if (cmd === "-v" || cmd === "--version" || cmd === "version") {
+    console.log(packageVersion());
+    return 0;
   }
   // `say` takes free text (which may contain things that look like flags): no option parsing.
   if (cmd === "say") return sayCmd(rest.join(" ").trim());
