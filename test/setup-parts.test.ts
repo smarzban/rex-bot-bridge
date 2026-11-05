@@ -208,3 +208,38 @@ test("T429 uninstall --purge: the init.lua backup it reports survives the purge"
   assert.ok((await readdir(f.ctx.paths.backupsDir)).length >= 2, "install and uninstall backups both kept");
   assert.match(out, /init\.lua backups kept in/);
 });
+
+test("T429 FR1-A: 0.2.x backups in the state dir are moved out and survive uninstall --purge; message is true", async () => {
+  const f = await fakeCtx(ok("{}"));
+  const { legacyBackupsDir, backupsDir, stateDir } = f.ctx.paths;
+  await mkdir(legacyBackupsDir, { recursive: true });
+  await writeFile(`${legacyBackupsDir}/init.lua.2026-11-01T00-00-00-000Z`, "-- old backup 1\n");
+  await writeFile(`${legacyBackupsDir}/init.lua.clash`, "-- old clash\n");
+  await mkdir(backupsDir, { recursive: true });
+  await writeFile(`${backupsDir}/init.lua.clash`, "-- new clash\n");
+  assert.equal(await uninstall(f.ctx, { yes: true, purge: true, serveOff: false }, makePrompter(true)), 0);
+  const out = f.out.join("\n");
+  assert.ok(!existsSync(stateDir), "state dir purged");
+  assert.equal(await readFile(`${backupsDir}/init.lua.2026-11-01T00-00-00-000Z`, "utf8"), "-- old backup 1\n");
+  assert.equal(await readFile(`${backupsDir}/init.lua.clash`, "utf8"), "-- new clash\n", "never overwrites");
+  assert.equal(await readFile(`${backupsDir}/init.lua.clash-1`, "utf8"), "-- old clash\n", "clash gets a suffix");
+  assert.match(out, /Moved 2 init\.lua backup\(s\)/);
+  assert.match(out, /init\.lua backups kept in/);
+});
+
+test("T429 FR1-A: setup (any part) moves 0.2.x backups out of the state dir", async () => {
+  const f = await fakeCtx(ok("{}"));
+  await mkdir(f.ctx.paths.legacyBackupsDir, { recursive: true });
+  await writeFile(`${f.ctx.paths.legacyBackupsDir}/init.lua.x`, "-- old\n");
+  assert.equal(await setup(f.ctx, { ...ALL }, makePrompter(true), "skill"), 0);
+  assert.ok(!existsSync(f.ctx.paths.legacyBackupsDir), "old dir removed once empty");
+  assert.equal(await readFile(`${f.ctx.paths.backupsDir}/init.lua.x`, "utf8"), "-- old\n");
+  assert.match(f.out.join("\n"), /Moved 1 init\.lua backup\(s\)/);
+});
+
+test("T429 FR1-A: --purge with no backups doesn't claim any were kept", async () => {
+  const f = await fakeCtx(ok("{}"));
+  await mkdir(f.ctx.paths.stateDir, { recursive: true });
+  await uninstall(f.ctx, { yes: true, purge: true, serveOff: false }, makePrompter(true));
+  assert.ok(!f.out.join("\n").includes("backups kept"));
+});

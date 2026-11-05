@@ -13,6 +13,8 @@ export interface Paths {
   watchedFile: string;
   heartbeatFile: string;
   backupsDir: string;
+  /** Where 0.2.x kept init.lua backups (inside stateDir); moved to backupsDir by setup/uninstall. */
+  legacyBackupsDir: string;
   /** ~/Library/Logs/rex-bot-bridge */
   logsDir: string;
   notifyLog: string;
@@ -40,6 +42,7 @@ export function resolvePaths(env: NodeJS.ProcessEnv = process.env): Paths {
     heartbeatFile: join(stateDir, "heartbeat"),
     // Next to init.lua, not in stateDir: `uninstall --purge` deletes stateDir and must keep these.
     backupsDir: join(dirname(env.REX_CONFIG || join(xdg, "rex/init.lua")), "rex-bot-backups"),
+    legacyBackupsDir: join(stateDir, "init-backups"),
     logsDir,
     notifyLog: join(logsDir, "notify.log"),
     auditLog: env.REX_BRIDGE_AUDIT_LOG || join(home, ".local/state/rex-bot-bridge/audit.log"),

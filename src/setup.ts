@@ -6,7 +6,7 @@ import { isEphemeralInstall, isSandboxHome, type Ctx } from "./context.js";
 import { DOC_RAW_URL, DOC_URL } from "./grokbot.js";
 import { bootstrapCommand, installServices, LEGACY_LABELS, serviceState } from "./launchd.js";
 import type { Prompter } from "./prompt.js";
-import { installBlock } from "./rexconfig.js";
+import { installBlock, migrateBackups } from "./rexconfig.js";
 import { ensurePrivateDir, MODES, readSettings, settingsExist, writeSettings, type Mode, type Settings } from "./settings.js";
 import { installSkills } from "./skills.js";
 import { serveArgs, servesDesired, serveTarget, shellCommand, tailscaleStatus } from "./tailscale.js";
@@ -297,6 +297,9 @@ export async function setup(ctx: Ctx, flags: SetupFlags, p: Prompter, part?: Par
   ctx.out(part ? `rex-bot-bridge setup: ${SECTION_TITLES[part].toLowerCase()}\n` : "rex-bot-bridge setup\n");
   const needRex = !part || part === "rex" || part === "services";
   if (!(await checks(ctx, out, needRex))) return 1;
+  // 0.2.x kept init.lua backups inside the state dir, which `uninstall --purge` deletes: move them out.
+  const migrated = await migrateBackups(ctx.paths.legacyBackupsDir, ctx.paths.backupsDir);
+  if (migrated.length) out.ok(`Moved ${migrated.length} init.lua backup(s) to ${ctx.paths.backupsDir}`);
 
   if (part) {
     const s = await readSettings(ctx.paths.configFile);

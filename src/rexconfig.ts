@@ -1,4 +1,4 @@
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, readFile, rename, rmdir, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import type { Runner } from "./rex.js";
 
@@ -165,4 +165,36 @@ export async function inspectBlock(initPath: string): Promise<{ present: boolean
     actionsPath: m?.[1]?.replace(/\\(.)/g, "$1"),
     legacy: hasLegacyInline(content),
   };
+}
+
+/**
+ * Moves init.lua backups from the 0.2.x location (inside the state dir, which `uninstall --purge` deletes)
+ * into `to`. Never overwrites: a name that's taken gets -1, -2, … Removes the old dir once empty.
+ * Returns the new paths of the moved files.
+ */
+export async function migrateBackups(from: string, to: string): Promise<string[]> {
+  let names: string[];
+  try {
+    names = await readdir(from);
+  } catch {
+    return [];
+  }
+  const moved: string[] = [];
+  for (const name of names) {
+    const src = join(from, name);
+    if (!(await stat(src)).isFile()) continue;
+    await mkdir(to, { recursive: true, mode: 0o700 });
+    let dest = join(to, name);
+    for (let i = 1; await stat(dest).then(() => true, () => false); i++) dest = join(to, `${name}-${i}`);
+    try {
+      await rename(src, dest);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EXDEV") throw e;
+      await copyFile(src, dest);
+      await unlink(src);
+    }
+    moved.push(dest);
+  }
+  await rmdir(from).catch(() => {}); // only if empty
+  return moved;
 }
