@@ -60,17 +60,26 @@ const PORT_OFF = ["serve", "--https=8443", "off"];
 const LEGACY_OFF = ["serve", "--https=443", "--set-path", "/rex-bridge", "off"];
 const changes = (calls: string[][]) => calls.filter((a) => a[0] === "serve" && a[1] !== "status");
 
-/** A fetch that answers like our bridge on the given origin's /healthz and 404s .well-known. */
-function bridgeFetch(origin = "https://mac.tail.ts.net:8443", wellKnown = 404): typeof fetch {
-  return (async (url: string | URL) => {
+/**
+ * A fetch that answers like our bridge's /healthz. Only the exact URL doctor must probe,
+ * `<origin>/.well-known/oauth-authorization-server`, gets `wellKnown` (404 by default); any other
+ * `.well-known` URL gets 200 with OAuth metadata, so probing a mistyped path makes doctor fail.
+ * Every URL fetched is recorded in `.urls`.
+ */
+function bridgeFetch(origin = "https://mac.tail.ts.net:8443", wellKnown = 404): typeof fetch & { urls: string[] } {
+  const urls: string[] = [];
+  const oauthJson = () => new Response(JSON.stringify({ issuer: "https://mac.tail.ts.net", authorization_endpoint: "https://mac.tail.ts.net/authorize" }), { status: 200 });
+  const f = (async (url: string | URL) => {
     const u = String(url);
+    urls.push(u);
     if (u === `${origin}/healthz`) return new Response(JSON.stringify({ ok: true, rex_reachable: true, watcher_heartbeat_age_s: 3 }), { status: 200 });
-    if (u.startsWith(`${origin}/.well-known/`))
-      return wellKnown === 404
-        ? new Response(JSON.stringify({ error: "not found" }), { status: 404 })
-        : new Response(JSON.stringify({ authorization_endpoint: "https://mac.tail.ts.net/authorize" }), { status: wellKnown });
+    if (u === `${origin}/.well-known/oauth-authorization-server`)
+      return wellKnown === 404 ? new Response(JSON.stringify({ error: "not found" }), { status: 404 }) : new Response(oauthJson().body, { status: wellKnown });
+    if (u.includes("/.well-known/")) return oauthJson();
     throw new Error(`unexpected fetch ${u}`);
-  }) as unknown as typeof fetch;
+  }) as unknown as typeof fetch & { urls: string[] };
+  f.urls = urls;
+  return f;
 }
 
 // ---------- setup serve ----------
@@ -259,8 +268,29 @@ const check = async (st: RunResult, f2?: typeof fetch) => {
   return (id: string) => checks.find((c) => c.id === id);
 };
 
+test("T431 bridgeFetch stub: only the exact probe path is 404; any other .well-known URL serves OAuth JSON", async () => {
+  const f = bridgeFetch();
+  assert.equal((await f("https://mac.tail.ts.net:8443/.well-known/oauth-authorization-server")).status, 404);
+  for (const u of [
+    "https://mac.tail.ts.net:8443/.well-known/oauth-authorisation-server",
+    "https://mac.tail.ts.net:8443/.well-known/oauth-protected-resource",
+    "https://mac.tail.ts.net:8443/.well-known/oauth-authorization-server/mcp",
+    "https://mac.tail.ts.net/.well-known/oauth-authorization-server",
+  ]) {
+    const r = await f(u);
+    assert.equal(r.status, 200, u);
+    assert.ok((await r.json()).authorization_endpoint, u);
+  }
+});
+
 test("T431 doctor: port mapping, tailnet healthz and no OAuth metadata on our origin → all ok", async () => {
-  const c = await check(serveStatus({ "/": T3 }, { "/": OURS }), bridgeFetch());
+  const fetchStub = bridgeFetch();
+  const c = await check(serveStatus({ "/": T3 }, { "/": OURS }), fetchStub);
+  assert.deepEqual(
+    fetchStub.urls.filter((u) => u.includes("/.well-known/")),
+    ["https://mac.tail.ts.net:8443/.well-known/oauth-authorization-server"],
+    "doctor probes exactly this URL",
+  );
   assert.equal(c("serve")?.level, "ok");
   assert.match(c("serve")!.detail, /https:\/\/mac\.tail\.ts\.net:8443 → http:\/\/127\.0\.0\.1:7400/);
   assert.equal(c("bridge_tailnet")?.level, "ok");
