@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { loadConfig } from "../src/config.js";
 import { resolvePaths } from "../src/paths.js";
-import { tempDir } from "./helpers.js";
+import { childEnv, tempDir } from "./helpers.js";
 
 const run = promisify(execFile);
 const bridgeCli = join(import.meta.dirname, "../src/cli/bridge.ts");
@@ -53,7 +53,8 @@ test("loadConfig: defaults, config.json, then env overrides; mode re-read per ca
 });
 
 async function cli(file: string, args: string[], env: Record<string, string>, input?: string) {
-  const p = run(process.execPath, ["--import", "tsx", file, ...args], { env: { ...process.env, ...env } });
+  const home = env.HOME ?? (await tempDir());
+  const p = run(process.execPath, ["--import", "tsx", file, ...args], { env: childEnv({ ...env, HOME: home }) });
   if (input !== undefined) {
     p.child.stdin?.end(input);
   }
@@ -134,5 +135,26 @@ test("--help lists the subcommands", async () => {
   const r = await cli(rexBotCli, ["--help"], {});
   for (const c of ["setup", "doctor", "uninstall", "serve", "watch", "token", "config", "say", "whoami", "notify", "grokbot"]) {
     assert.match(r.stdout, new RegExp(`rex-bot ${c}`));
+  }
+});
+
+test("CLI subprocesses get a scratch env: inherited REX_*/XDG/token overrides never leak in", async () => {
+  const env = childEnv({ HOME: "/tmp/x" });
+  for (const k of Object.keys(env)) assert.ok(["PATH", "HOME", "TMPDIR"].includes(k), `unexpected ${k}`);
+  const home = await tempDir();
+  const saved = { ...process.env };
+  process.env.REX_BRIDGE_TOKEN_FILE = join(home, "leaked-token");
+  process.env.XDG_CONFIG_HOME = join(home, "leaked-xdg");
+  process.env.REX_BOT_DIR = join(home, "leaked-dir");
+  try {
+    const r = await cli(rexBotCli, ["token", "--rotate"], { HOME: home });
+    assert.equal(r.code, 0);
+    assert.equal(r.stdout, `rotated: ${join(home, ".config/rex-bot-bridge/token")}\n`);
+    await assert.rejects(stat(join(home, "leaked-token")));
+  } finally {
+    for (const k of ["REX_BRIDGE_TOKEN_FILE", "XDG_CONFIG_HOME", "REX_BOT_DIR"]) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
   }
 });

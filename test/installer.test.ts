@@ -26,7 +26,7 @@ import { readSettings, setKey, writeSettings, DEFAULTS } from "../src/settings.j
 import { migrateWatched } from "../src/setup.js";
 import { installSkills, uninstallSkills, SKILL_MARKER } from "../src/skills.js";
 import { serveTarget } from "../src/tailscale.js";
-import { tempDir } from "./helpers.js";
+import { childEnv, tempDir } from "./helpers.js";
 
 const execFileP = promisify(execFile);
 
@@ -290,7 +290,7 @@ test("notify/say CLI: stdout and stderr never contain the URL or key", async () 
   const home = await tempDir();
   const KEY = "fixture-key-2"; // not a secret: test fixture
   const cli = join(import.meta.dirname, "../src/cli/rex-bot.ts");
-  const env = { ...process.env, HOME: home, REX_SESSION: "session:test", REX_BLOCK: "block:test" };
+  const env = childEnv({ HOME: home, REX_SESSION: "session:test", REX_BLOCK: "block:test" });
   const runCli = (args: string[], input?: string) => {
     const p = execFileP(process.execPath, ["--import", "tsx", cli, ...args], { env });
     if (input !== undefined) p.child.stdin?.end(input);
@@ -370,10 +370,10 @@ test("skills: installed only under existing roots; uninstall removes only ours",
 test("tailscale: serveTarget reads the :443 handler for the path", async () => {
   const status = { Web: { "mac.tail.ts.net:443": { Handlers: { "/rex-bridge": { Proxy: "http://127.0.0.1:7400" } } } } };
   const ts: Runner = async () => ({ stdout: JSON.stringify(status), stderr: "", code: 0 });
-  assert.equal(await serveTarget(ts, "/rex-bridge"), "http://127.0.0.1:7400");
-  assert.equal(await serveTarget(ts, "/other"), null);
+  assert.deepEqual(await serveTarget(ts, "/rex-bridge"), { kind: "occupied", target: "http://127.0.0.1:7400" });
+  assert.deepEqual(await serveTarget(ts, "/other"), { kind: "absent" });
   const empty: Runner = async () => ({ stdout: "{}", stderr: "", code: 0 });
-  assert.equal(await serveTarget(empty, "/rex-bridge"), null);
+  assert.deepEqual(await serveTarget(empty, "/rex-bridge"), { kind: "absent" });
 });
 
 test("launchd uninstall: only boots out services whose plist is in this HOME", async () => {

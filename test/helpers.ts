@@ -79,6 +79,17 @@ export class FakeRex {
   }
 }
 
+/**
+ * Env for a CLI subprocess under test, built from scratch (never from process.env), so a test can't
+ * reach the real ~/.config, Rex server, or token through an inherited REX_*, XDG_CONFIG_HOME,
+ * REX_BRIDGE_TOKEN_FILE or REX_BOT_LOG_DIR. HOME must be a temp dir.
+ */
+export function childEnv(vars: Record<string, string> & { HOME: string }): Record<string, string> {
+  const env: Record<string, string> = { PATH: process.env.PATH ?? "/usr/bin:/bin", ...vars };
+  if (process.env.TMPDIR && !("TMPDIR" in vars)) env.TMPDIR = process.env.TMPDIR;
+  return env;
+}
+
 export async function tempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "rex-bridge-test-"));
 }
