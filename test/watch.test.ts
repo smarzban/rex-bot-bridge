@@ -25,7 +25,7 @@ test("remove keeps comments and other ids", () => {
   assert.equal(removeWatched(content, "session:none"), content);
 });
 
-test("file round-trip with comments leaves the file byte-identical and keeps its mode", async () => {
+test("file round-trip with comments leaves the file byte-identical and tightens it to 0600", async () => {
   const dir = await tempDir();
   const path = join(dir, "sessions");
   const original = `# opted-in sessions\n# one per line\n\n${B}  # coordinator\n`;
@@ -38,7 +38,7 @@ test("file round-trip with comments leaves the file byte-identical and keeps its
   assert.equal(await w.add(A), false);
   assert.equal(await w.remove(A), true);
   assert.equal(await readFile(path, "utf8"), original);
-  assert.equal((await stat(path)).mode & 0o777, 0o640);
+  assert.equal((await stat(path)).mode & 0o777, 0o600);
   assert.deepEqual(await readdir(dir), ["sessions"], "no temp files left behind");
 });
 

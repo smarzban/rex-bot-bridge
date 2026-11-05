@@ -36,7 +36,7 @@ type Result = { content: { type: "text"; text: string }[]; isError?: boolean };
 
 /** Registers every bridge tool on a fresh McpServer. Each call is audited. */
 export function buildMcpServer(ops: Ops, audit: AuditLog): McpServer {
-  const server = new McpServer({ name: "rex-bot-bridge", version: "0.1.0" });
+  const server = new McpServer({ name: "rex-bot-bridge", version: "0.2.0" });
 
   const wrap =
     <A extends Record<string, unknown>>(tool: string, fn: (args: A) => Promise<unknown>) =>
@@ -128,7 +128,9 @@ export function buildMcpServer(ops: Ops, audit: AuditLog): McpServer {
         "Start an agent in a new Rex pane. agent: claude|codex|pi|grok (prompt passed as the CLI's initial prompt), " +
         "shell (login shell, no prompt) or custom (command = argv array). Give session_id to open a new tab in an " +
         "existing session, or new_session_label to create a new session. With watch=true (default) the session is " +
-        "added to the bot-watch list so status changes are pushed to the coordinator. Returns session_id and block_id.",
+        "added to the bot-watch list so status changes are pushed to the coordinator. Returns session_id and block_id. " +
+        "In watched mode (see bridge_status) session_id must be a watched session, a new session is always watched, " +
+        "and watch is ignored (the bot never adds an existing session to the list).",
       inputSchema: {
         agent: z.enum(AGENTS),
         cwd: z.string().min(1).describe("Absolute directory (or ~/...)"),
@@ -185,7 +187,9 @@ export function buildMcpServer(ops: Ops, audit: AuditLog): McpServer {
   server.registerTool(
     "watch_session",
     {
-      description: "Add a session to the bot-watch list so its agents' status changes are pushed to the coordinator.",
+      description:
+        "Add a session to the bot-watch list so its agents' status changes are pushed to the coordinator. " +
+        "Only in full mode: in watched mode only the human can opt a session in.",
       inputSchema: { session_id: SESSION_ID },
     },
     wrap("watch_session", (a: { session_id: string }) => ops.watchSession(a.session_id)),
@@ -209,7 +213,9 @@ export function buildMcpServer(ops: Ops, audit: AuditLog): McpServer {
   server.registerTool(
     "bridge_status",
     {
-      description: "Bridge health: Rex version, watcher heartbeat age (s), number of watched sessions, audit log path.",
+      description:
+        "Bridge health and powers: mode (watched = pane and session tools only work on watched sessions; full = every " +
+        "session), Rex version, watcher heartbeat age (s), number of watched sessions, audit log path.",
       inputSchema: {},
       annotations: ro,
     },

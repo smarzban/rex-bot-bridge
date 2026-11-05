@@ -4,3 +4,4 @@ dist/
 *.log
 AGENTS.local.md
 HANDOFF.md
+.review-panel/
