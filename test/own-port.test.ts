@@ -244,6 +244,15 @@ test("T431 doctor: OAuth metadata answering on our origin is a failure", async (
   assert.match(c("oauth_discovery")!.detail, /answered HTTP 200 \(expected 404\)/);
 });
 
+test("T432 doctor: no mapping on port 8443 → fail, fix is the exact tailscale serve command", async () => {
+  for (const st of [serveStatus(null, null), serveStatus({ "/": T3 }, null)]) {
+    const c = await check(st);
+    assert.equal(c("serve")?.level, "fail");
+    assert.equal(c("serve")!.detail, "Tailscale Serve has no port 8443 mapping");
+    assert.equal(c("serve")!.fix, "tailscale serve --bg --https=8443 http://127.0.0.1:7400");
+  }
+});
+
 test("T431 doctor: another app on our port → fail, fix is to pick another servePort", async () => {
   const c = await check(serveStatus(null, { "/": T3 }));
   assert.equal(c("serve")?.level, "fail");

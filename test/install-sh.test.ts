@@ -26,7 +26,6 @@ case "$1" in
   --version) echo 11.0.0 ;;
   prefix) echo "\${STUB_PREFIX_SHOWN:-$STUB_PREFIX}" ;;
   view) [ "\${STUB_PUBLISHED:-0}" = 1 ] && echo 0.3.0 || exit 1 ;;
-  uninstall) rm -rf "$STUB_PREFIX/lib/node_modules/rex-grokbot-bridge" ;;
   pack) shift; while [ "$1" != "--pack-destination" ]; do shift; done; : > "$2/rex-grokbot-bridge-0.3.0.tgz" ;;
   install)
     case " $* " in
