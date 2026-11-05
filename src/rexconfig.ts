@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readdir, readFile, rename, rmdir, stat, unlink, writeFile } from "node:fs/promises";
+import { copyFile, lstat, mkdir, readdir, readFile, rename, rmdir, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import type { Runner } from "./rex.js";
 
@@ -182,14 +182,17 @@ export async function migrateBackups(from: string, to: string): Promise<string[]
   const moved: string[] = [];
   for (const name of names) {
     const src = join(from, name);
-    if (!(await stat(src)).isFile()) continue;
+    // Skip anything that isn't a regular file now (a broken symlink, a dir, a file that just vanished).
+    if (!(await lstat(src).catch(() => null))?.isFile()) continue;
     await mkdir(to, { recursive: true, mode: 0o700 });
     let dest = join(to, name);
-    for (let i = 1; await stat(dest).then(() => true, () => false); i++) dest = join(to, `${name}-${i}`);
+    for (let i = 1; await lstat(dest).then(() => true, () => false); i++) dest = join(to, `${name}-${i}`);
     try {
       await rename(src, dest);
     } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "EXDEV") throw e;
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") continue; // vanished mid-run
+      if (code !== "EXDEV") throw e;
       await copyFile(src, dest);
       await unlink(src);
     }

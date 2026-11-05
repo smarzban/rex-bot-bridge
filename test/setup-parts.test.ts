@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { installServices, LABELS } from "../src/launchd.js";
 import { makePrompter, scriptedPrompter } from "../src/prompt.js";
 import { runDoctor } from "../src/doctor.js";
@@ -242,4 +242,18 @@ test("T429 FR1-A: --purge with no backups doesn't claim any were kept", async ()
   await mkdir(f.ctx.paths.stateDir, { recursive: true });
   await uninstall(f.ctx, { yes: true, purge: true, serveOff: false }, makePrompter(true));
   assert.ok(!f.out.join("\n").includes("backups kept"));
+});
+
+test("T429 FR2 N-2: a broken symlink (or a subdir) in the old init-backups dir is skipped, not fatal", async () => {
+  const { symlink } = await import("node:fs/promises");
+  const f = await fakeCtx(ok("{}"));
+  const { legacyBackupsDir, backupsDir } = f.ctx.paths;
+  await mkdir(join(legacyBackupsDir, "subdir"), { recursive: true });
+  await symlink(join(legacyBackupsDir, "does-not-exist"), join(legacyBackupsDir, "init.lua.broken-link"));
+  await writeFile(join(legacyBackupsDir, "init.lua.good"), "-- good\n");
+  assert.equal(await setup(f.ctx, { ...ALL }, makePrompter(true), "skill"), 0, f.out.join("\n"));
+  assert.equal(await readFile(join(backupsDir, "init.lua.good"), "utf8"), "-- good\n");
+  assert.ok(!existsSync(join(backupsDir, "init.lua.broken-link")), "the broken link is left where it was");
+  assert.match(f.out.join("\n"), /Moved 1 init\.lua backup\(s\)/);
+  assert.equal(await uninstall(f.ctx, { yes: true, purge: true, serveOff: false }, makePrompter(true)), 0, "uninstall --purge isn't aborted either");
 });
