@@ -26,6 +26,7 @@ export function makePrompter(yes: boolean): Prompter {
       const rl = createInterface({ input: process.stdin, output, terminal: true });
       // Ctrl-C: readline swallows SIGINT in terminal mode, so exit like a shell would.
       rl.on("SIGINT", () => {
+        rl.close(); // restores the terminal (raw mode off, echo back on) before exiting
         process.stderr.write("\n");
         process.exit(130);
       });
@@ -69,9 +70,12 @@ export function makePrompter(yes: boolean): Prompter {
 
 /**
  * A prompter with scripted answers, for tests. Keys are matched as substrings of the question.
- * An array answers successive askings in order (the last entry repeats).
+ * An array answers successive askings in order (the last entry repeats). `asked` records each ask() with its opts.
  */
-export function scriptedPrompter(answers: Record<string, string | string[] | boolean> = {}): Prompter {
+export function scriptedPrompter(
+  answers: Record<string, string | string[] | boolean> = {},
+): Prompter & { asked: { q: string; opts: { secret?: boolean; def?: string } }[] } {
+  const asked: { q: string; opts: { secret?: boolean; def?: string } }[] = [];
   const used = new Map<string, number>();
   const find = (q: string): string | boolean | undefined => {
     const hit = Object.entries(answers).find(([k]) => q.includes(k));
@@ -84,11 +88,13 @@ export function scriptedPrompter(answers: Record<string, string | string[] | boo
   };
   return {
     interactive: true,
+    asked,
     async confirm(q, def) {
       const a = find(q);
       return typeof a === "boolean" ? a : def;
     },
     async ask(q, opts = {}) {
+      asked.push({ q, opts });
       const a = find(q);
       return typeof a === "string" ? a : (opts.def ?? "");
     },

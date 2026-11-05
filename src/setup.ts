@@ -66,16 +66,23 @@ export async function migrateWatched(legacyFile: string, watchedFile: string): P
   return added;
 }
 
-/** Strips a pasted `Authorization:` and/or `Bearer ` prefix from a webhook key answer. */
-export function normalizeKeyAnswer(a: string): string {
-  return a
-    .trim()
-    .replace(/^authorization\s*:\s*/i, "")
-    .replace(/^bearer\s+/i, "")
-    .trim();
+/** Strips a leading `Bearer ` from a key value. */
+function stripBearer(v: string): string {
+  return v.trim().replace(/^bearer\s+/i, "").trim();
 }
 
 const HEADER_NAME = /^[A-Za-z0-9-]+$/;
+
+/**
+ * Reads the (hidden) key answer. A pasted header line `Name: value` (a space after the colon, so a
+ * bare key like `abc:def` stays a key) gives the header name and the key; a leading `Bearer ` is
+ * stripped either way.
+ */
+export function parseKeyAnswer(a: string): { key: string; header?: string } {
+  const m = /^([A-Za-z0-9-]+):\s+(.*)$/.exec(a.trim());
+  if (m) return { header: m[1]!, key: stripBearer(m[2]!) };
+  return { key: stripBearer(a) };
+}
 
 /**
  * Reads a header answer. A pasted full header line (`Name: value`) gives the name, and its value
@@ -87,7 +94,7 @@ export function parseHeaderAnswer(a: string, key: string): { header: string; key
   const m = /^([^:\s]+)\s*:\s*(.*)$/.exec(name);
   if (m) {
     name = m[1]!;
-    const v = normalizeKeyAnswer(m[2]!);
+    const v = stripBearer(m[2]!);
     if (v) key = v;
   }
   if (!HEADER_NAME.test(name)) return { error: "a header name is letters, digits and dashes only, e.g. X-Webhook-Key" };
@@ -111,6 +118,10 @@ async function askValid(
   return undefined;
 }
 
+export const KEY_QUESTION = "Webhook key (Enter if none; input hidden)";
+export const HEADER_QUESTION =
+  "Header name for the key [Authorization] (just the name, e.g. X-Webhook-Key; Enter for Authorization: Bearer <key>; input hidden)";
+
 /** Interactive webhook questions: URL, then the key (hidden), then the header name (only with a key). */
 async function askWebhook(s: Settings, p: Prompter, say: (s: string) => void, warn: (s: string) => void): Promise<Settings> {
   const url = await askValid(
@@ -126,26 +137,36 @@ async function askWebhook(s: Settings, p: Prompter, say: (s: string) => void, wa
   if (!url) return s;
   s = setKey(s, "webhook.url", url);
 
-  let key = normalizeKeyAnswer(await p.ask("Webhook key (Enter if none; input hidden)", { secret: true }));
-  if (!key) return s;
+  const k = parseKeyAnswer(await p.ask(KEY_QUESTION, { secret: true }));
+  if (!k.key) return s;
+  let key = k.key;
+  let header = k.header;
 
-  let parsed: { header: string; key: string } | undefined;
-  await askValid(
-    p,
-    "Header name for the key [Authorization] (just the name, e.g. X-Webhook-Key; Enter for Authorization: Bearer <key>)",
-    (a) => {
-      const r = parseHeaderAnswer(a, key);
-      if ("error" in r) return `That isn't a header name: ${r.error}.`;
-      parsed = r;
-      return undefined;
-    },
-    say,
-  );
-  if (parsed) {
-    key = parsed.key;
-    if (parsed.header.toLowerCase() !== "authorization") s = setKey(s, "webhook.header", parsed.header);
-  } else {
-    warn(`No valid header name after ${MAX_TRIES} tries; the key will be sent as Authorization: Bearer <key>. Change it later: rex-bot config set webhook.header <name>`);
+  if (!header) {
+    // Hidden too: people paste a whole `Name: value` header line here, value and all.
+    let parsed: { header: string; key: string } | undefined;
+    await askValid(
+      p,
+      HEADER_QUESTION,
+      (a) => {
+        const r = parseHeaderAnswer(a, key);
+        if ("error" in r) return `That isn't a header name: ${r.error}.`;
+        parsed = r;
+        return undefined;
+      },
+      say,
+      { secret: true },
+    );
+    if (parsed) {
+      key = parsed.key;
+      header = parsed.header;
+    } else {
+      warn(`No valid header name after ${MAX_TRIES} tries; the key will be sent as Authorization: Bearer <key>. Change it later: rex-bot config set webhook.header <name>`);
+    }
+  }
+  if (header && HEADER_NAME.test(header)) {
+    say(`   Header: ${header}`); // the name only, never the value
+    if (header.toLowerCase() !== "authorization") s = setKey(s, "webhook.header", header);
   }
   return setKey(s, "webhook.key", key);
 }
