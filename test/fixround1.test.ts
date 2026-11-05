@@ -335,37 +335,6 @@ test("K8 uninstall: `tailscale serve off` only for our own mapping, and only whe
 
 // ---------- Fix round 2 ----------
 
-test("R1 setup: the v1 list is imported once; an unwatched session stays unwatched on re-run", async () => {
-  const f = await fakeCtx(ok("{}"));
-  const legacy = f.ctx.paths.legacyWatchedFile;
-  await mkdir(join(legacy, ".."), { recursive: true });
-  await writeFile(legacy, `# v1\n${S1}\n${S2}\n`);
-  const flags = { ...FLAGS, serve: false };
-  assert.equal(await setup(f.ctx, flags, makePrompter(true)), 0);
-  const watch = new WatchFile(f.ctx.paths.watchedFile);
-  assert.deepEqual(await watch.list(), [S1, S2]);
-  assert.ok((await readSettings(f.ctx.paths.configFile)).migratedV1At, "marker recorded");
-
-  await watch.remove(S1); // the human unwatches it in v2
-  assert.equal(await setup(f.ctx, flags, makePrompter(true)), 0);
-  assert.deepEqual(await watch.list(), [S2], "re-run must not re-import");
-  // Even with the v2 list deleted, the recorded import is not repeated.
-  await writeFile(f.ctx.paths.watchedFile, "");
-  await setup(f.ctx, flags, makePrompter(true));
-  assert.deepEqual(await watch.list(), []);
-});
-
-test("R1 setup: an existing v2 watched file blocks the v1 import even without a marker", async () => {
-  const f = await fakeCtx(ok("{}"));
-  await mkdir(join(f.ctx.paths.legacyWatchedFile, ".."), { recursive: true });
-  await writeFile(f.ctx.paths.legacyWatchedFile, `${S1}\n`);
-  await mkdir(f.ctx.paths.stateDir, { recursive: true });
-  await writeFile(f.ctx.paths.watchedFile, `${S2}\n`);
-  await setup(f.ctx, { ...FLAGS, serve: false }, makePrompter(true));
-  assert.deepEqual(await new WatchFile(f.ctx.paths.watchedFile).list(), [S2]);
-  assert.ok((await readSettings(f.ctx.paths.configFile)).migratedV1At);
-});
-
 test("R3 doctor: warns when watched/heartbeat/token/config.json are not 0600", async () => {
   const f = await fakeCtx(ok("{}"));
   const p = f.ctx.paths;

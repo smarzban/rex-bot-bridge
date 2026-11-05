@@ -28,7 +28,7 @@ export const HELP: Record<string, CommandHelp> = {
     ],
     summary: "install or repair everything (or one part); setup webhook adds the routine's webhook",
     description:
-      "Install or repair rex-bot-bridge on this Mac. Bare setup runs Checks, Settings (token, mode), then\n" +
+      "Install or repair rex-grokbot-bridge on this Mac. Bare setup runs Checks, Settings (token, mode), then\n" +
       "every part below, and ends with what to do next. Safe to re-run: it keeps your token, mode and\n" +
       "webhook. Each part also runs on its own. The webhook is separate: you get it from the Grok Bot\n" +
       "routine, which you create after setup (see Next).",
@@ -37,7 +37,7 @@ export const HELP: Record<string, CommandHelp> = {
         "Parts",
         [
           ["rex", "add the palette actions to Rex's init.lua (backed up, checked, rolled back on failure)"],
-          ["services", "install and (re)start the launchd services com.rexbotbridge.bridge and .watch"],
+          ["services", "install and (re)start the launchd services com.rexgrokbotbridge.bridge and .watch"],
           ["serve", "give the bridge its own origin, https://<mac>.<tailnet>.ts.net:8443 (tailscale serve, asks)"],
           ["skill", "install the rex-grokbot agent skill into ~/.claude/skills and ~/.agents/skills"],
           ["webhook", "ask for the routine's webhook URL, key and header, save, send a test (see help setup webhook)"],
@@ -125,15 +125,14 @@ export const HELP: Record<string, CommandHelp> = {
     summary: "remove the services, palette actions and skill",
     description:
       "Stop and remove the launchd services, the init.lua block and the agent skill. Keeps\n" +
-      "~/.config/rex-bot-bridge (token, config, watched list) unless --purge. Asks before removing the\n" +
-      "Tailscale Serve mappings (our port, and the old /rex-bridge path on 443 if still there), and\n" +
-      "only ever removes our own.",
+      "~/.config/rex-grokbot-bridge (token, config, watched list) unless --purge. Asks before removing the\n" +
+      "Tailscale Serve mapping on our port, and only ever removes our own.",
     sections: [
       [
         "Options",
         [
           ["--yes, -y", "don't ask (the Serve mappings stay unless --serve-off)"],
-          ["--purge", "also delete ~/.config/rex-bot-bridge"],
+          ["--purge", "also delete ~/.config/rex-grokbot-bridge"],
           ["--serve-off", "also remove our Tailscale Serve mappings"],
         ],
       ],
@@ -144,7 +143,7 @@ export const HELP: Record<string, CommandHelp> = {
   config: {
     usage: ["rex-grokbot config get <key> [--show]", "rex-grokbot config set <key> <value>"],
     summary: "read or change one setting in config.json",
-    description: "Read or change one setting in ~/.config/rex-bot-bridge/config.json. Mode changes apply on the\nbot's next call; port and host need the services restarted (rex-grokbot setup services);\nservePort (the tailnet HTTPS port, default 8443, not 443) needs rex-grokbot setup serve.",
+    description: "Read or change one setting in ~/.config/rex-grokbot-bridge/config.json. Mode changes apply on the\nbot's next call; port and host need the services restarted (rex-grokbot setup services);\nservePort (the tailnet HTTPS port, default 8443, not 443) needs rex-grokbot setup serve.",
     sections: [
       [
         "Arguments",
@@ -189,7 +188,7 @@ export const HELP: Record<string, CommandHelp> = {
     description:
       "In watched mode the bot can read and drive only sessions on this list. You can also toggle a\n" +
       "session from Rex's palette: Bot: Watch / Unwatch This Session. Bare `rex-grokbot watch` runs the\n" +
-      "status watcher (the com.rexbotbridge.watch service runs it for you).",
+      "status watcher (the com.rexgrokbotbridge.watch service runs it for you).",
     sections: [
       [
         "Arguments",
@@ -222,7 +221,7 @@ export const HELP: Record<string, CommandHelp> = {
     summary: "run the MCP bridge (127.0.0.1:7400 by default)",
     description:
       "Run the MCP server the bot connects to, on host:port from config.json. The\n" +
-      "com.rexbotbridge.bridge service runs it for you; run it by hand after setup --no-services.",
+      "com.rexgrokbotbridge.bridge service runs it for you; run it by hand after setup --no-services.",
     sections: [],
     examples: ["rex-grokbot serve"],
     exit: "runs until stopped · 1 no token (run rex-grokbot setup)",

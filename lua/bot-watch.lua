@@ -1,19 +1,19 @@
 -- bot-watch.lua: forward agent status changes in opted-in Rex sessions to the coordinator's webhook.
 --
--- Started by `rex-grokbot watch` (the com.rexbotbridge.watch launchd service), which runs
+-- Started by `rex-grokbot watch` (the com.rexgrokbotbridge.watch launchd service), which runs
 --   rex do --all <package>/lua/bot-watch.lua
 -- with these environment variables set:
---   REX_BOT_DIR   state dir holding `watched` (opt-in list) and `heartbeat`
---   REX_BOT_NODE  absolute path of node
---   REX_BOT_CLI   absolute path of dist/cli/rex-grokbot.js (its `notify` command POSTs stdin to the webhook)
+--   REX_GROKBOT_DIR   state dir holding `watched` (opt-in list) and `heartbeat`
+--   REX_GROKBOT_NODE  absolute path of node
+--   REX_GROKBOT_CLI   absolute path of dist/cli/rex-grokbot.js (its `notify` command POSTs stdin to the webhook)
 --
 -- Fires when a pane's program status *enters* done / blocked / error and stays there for DEBOUNCE
 -- seconds. Works for any program that speaks OSC 7501 (Claude Code and Pi do natively).
 
 local HOME = os.getenv("HOME") or ""
-local DIR = os.getenv("REX_BOT_DIR") or (HOME .. "/.config/rex-bot-bridge")
-local NODE = os.getenv("REX_BOT_NODE") or "node"
-local CLI = os.getenv("REX_BOT_CLI")
+local DIR = os.getenv("REX_GROKBOT_DIR") or (HOME .. "/.config/rex-grokbot-bridge")
+local NODE = os.getenv("REX_GROKBOT_NODE") or "node"
+local CLI = os.getenv("REX_GROKBOT_CLI")
 local WATCHED_FILE = DIR .. "/watched"
 local HEARTBEAT_FILE = DIR .. "/heartbeat"
 local TERMINAL = "com.superlogical.terminal"
@@ -21,7 +21,7 @@ local DEBOUNCE = tonumber(os.getenv("BOT_WATCH_DEBOUNCE") or "") or 3
 local NOTIFY_STATES = { done = true, blocked = true, error = true }
 
 if not CLI or CLI == "" then
-  error("REX_BOT_CLI is not set; start the watcher with `rex-grokbot watch`", 0)
+  error("REX_GROKBOT_CLI is not set; start the watcher with `rex-grokbot watch`", 0)
 end
 
 local function read_file(path)
@@ -69,7 +69,7 @@ end
 local function send(payload)
   local body = rex.json.encode(payload)
   local r, err = rex.exec({ NODE, CLI, "notify" },
-    { env = { REX_BOT_DIR = DIR }, stdin = body, timeout = 10 })
+    { env = { REX_GROKBOT_DIR = DIR }, stdin = body, timeout = 10 })
   local out = r and (r.stdout or ""):gsub("%s+$", "") or ""
   print(os.date("!%Y-%m-%dT%H:%M:%SZ") .. " " .. payload.state .. " " .. (payload.app or "?") .. " " ..
     payload.rex_block .. " -> " .. (r and out or ("ERR " .. tostring(err))))

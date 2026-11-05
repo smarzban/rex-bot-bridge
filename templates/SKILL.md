@@ -2,12 +2,12 @@
 name: rex-grokbot
 description: Message the coordinator bot that watches this Rex session (finished, blocked, need a decision) with `rex-grokbot say`, and find this pane's Rex ids with `rex-grokbot whoami`. Use when you are running inside Rex and need to tell the coordinator something in words.
 metadata:
-  installed-by: rex-bot-bridge
+  installed-by: rex-grokbot-bridge
 ---
 
 # rex-grokbot: talk to the coordinator
 
-A coordinator bot (for example Grok Bot) may be watching this Rex session through rex-bot-bridge.
+A coordinator bot (for example Grok Bot) may be watching this Rex session through rex-grokbot-bridge.
 It already gets status changes (done / blocked / error) automatically. Use `rex-grokbot say` only when
 the message needs words: a result, a question, a decision you need, a link to a PR.
 

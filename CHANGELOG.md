@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.6.0 — 2026-11-06
+
+The project is now **rex-grokbot-bridge**, and the Grok Bot guide is written for the bot. There are no existing
+installs to carry forward, so the rename is complete and the old upgrade paths are gone.
+
+- **Rename.** The GitHub repo is `smarzban/rex-grokbot-bridge` and the npm package is `rex-grokbot-bridge` (it was
+  `rex-bot-bridge`). Every GitHub/raw/codeload URL, the guide links, the MCP server name, the `WWW-Authenticate`
+  realm, help and output use the new name. The doctor test reply is now "rex-grokbot-bridge webhook OK". The CLI is
+  still `rex-grokbot`.
+- **Internals renamed too, with no migration:** `~/.config/rex-grokbot-bridge`, `~/Library/Logs/rex-grokbot-bridge`,
+  `~/.local/state/rex-grokbot-bridge`, `~/.config/rex/rex-grokbot-backups`, launchd labels
+  `com.rexgrokbotbridge.{bridge,watch}`, the `init.lua` markers `-- >>> rex-grokbot-bridge >>>`, the skill marker
+  `installed-by: rex-grokbot-bridge`, `lua/rex-grokbot-actions.lua`, and env vars `REX_GROKBOT_DIR`,
+  `REX_GROKBOT_LOG_DIR`, `REX_GROKBOT_NODE`, `REX_GROKBOT_CLI`, `REX_GROKBOT_SOURCE`, `REX_GROKBOT_VERSION`.
+- **Removed backward-compat code:** the v1 opt-in list import (`~/.config/rex/bot-watch/sessions`, `migratedV1At`),
+  v1 launchd label and hand-started session warnings, v1 inline palette detection, the 0.2.x `init-backups`
+  move, removal of the pre-0.4 `rex-bot` skill, and the ≤ 0.4 `/rex-bridge`-on-443 migration in setup, doctor
+  and uninstall (with the `servePath` setting). Their tests went with them.
+- **Bot-first guide.** `docs/grok-bot.md` is now the page Grok Bot follows (based on the bot's own rewrite): done
+  criteria, who does what, nine steps, the routine prompt (reads the pane with `read_pane` on `rex_block`, reports
+  `done` events briefly, stays quiet only for duplicates), a `rex-usage` skill for chat turns, and troubleshooting
+  for OAuth sign-in, HTTP 502 and reachability. Fixed against the code: palette action **Bot: Watch / Unwatch This
+  Session**, `spawn_agent`'s `watch` (ignored in watched mode), `watch_session` refused in watched mode.
+- **README Quickstart** carries the person's half: the Tailscale plugin details, what the bot will ask for (URL,
+  token pasted once in a private chat, static header, rotation), and an "If the bot can't reach the Mac" table.
+
 ## 0.5.0 — 2026-11-05
 
 The bridge gets its own HTTPS origin on the tailnet, so another app's OAuth metadata can't hijack the connector.
@@ -89,7 +115,7 @@ Setup v3: no more circular order for new users, a Grok Bot guide, tsk-style help
 - **Help:** `rex-bot --help` lists commands in groups; every command has `rex-bot help <command>` /
   `<command> --help` with usage, options, output, examples and exit codes. Unknown commands and options give one
   line plus a `--help` hint, exit 2. The README command table is generated from it (`npm run docs:commands`).
-- **`install.sh`:** `curl -fsSL https://raw.githubusercontent.com/smarzban/rex-bot-bridge/main/install.sh | sh`
+- **`install.sh`:** `curl -fsSL https://raw.githubusercontent.com/smarzban/rex-grokbot-bridge/main/install.sh | sh`
   checks macOS/Node/npm, installs with npm (registry, else GitHub; `REX_BOT_SOURCE`, `REX_BOT_VERSION`), never uses
   sudo, reports old → new version on upgrade, and offers to run `rex-bot setup`.
 - **Fix: launchd re-install race.** `bootout` returns before launchd has unloaded the service, so the immediate

@@ -19,14 +19,14 @@ const STUBS: Record<string, string> = {
   --version) echo "v\${STUB_NODE_MAJOR:-22}.0.0" ;;
 esac`,
   curl: `echo "curl $*" >> "$STUB_LOG"
-d=$(mktemp -d); mkdir -p "$d/rex-bot-bridge-src"; echo '{"name":"rex-bot-bridge"}' > "$d/rex-bot-bridge-src/package.json"
-tar -czf - -C "$d" rex-bot-bridge-src`,
+d=$(mktemp -d); mkdir -p "$d/rex-grokbot-bridge-src"; echo '{"name":"rex-grokbot-bridge"}' > "$d/rex-grokbot-bridge-src/package.json"
+tar -czf - -C "$d" rex-grokbot-bridge-src`,
   npm: `echo "npm $*" >> "$STUB_LOG"
 case "$1" in
   --version) echo 11.0.0 ;;
   prefix) echo "\${STUB_PREFIX_SHOWN:-$STUB_PREFIX}" ;;
   view) [ "\${STUB_PUBLISHED:-0}" = 1 ] && echo 0.3.0 || exit 1 ;;
-  pack) shift; while [ "$1" != "--pack-destination" ]; do shift; done; : > "$2/rex-bot-bridge-0.3.0.tgz" ;;
+  pack) shift; while [ "$1" != "--pack-destination" ]; do shift; done; : > "$2/rex-grokbot-bridge-0.3.0.tgz" ;;
   install)
     case " $* " in
       *" -g "*)
@@ -89,7 +89,7 @@ test("FR1-B install.sh: not macOS → clear exit, nothing installed", async () =
   const sb = await sandbox();
   const r = sb.run({ STUB_OS: "Linux" });
   assert.equal(r.status, 1);
-  assert.match(r.out, /rex-bot-bridge is for macOS/);
+  assert.match(r.out, /rex-grokbot-bridge is for macOS/);
   assert.deepEqual(globalInstall(await sb.calls()), []);
 });
 
@@ -97,7 +97,7 @@ test("FR1-B install.sh: Node too old → clear exit with the fix, nothing instal
   const sb = await sandbox();
   const r = sb.run({ STUB_NODE_MAJOR: "20" });
   assert.equal(r.status, 1);
-  assert.match(r.out, /Node v20\.0\.0 is too old; rex-bot-bridge needs Node 22 or newer/);
+  assert.match(r.out, /Node v20\.0\.0 is too old; rex-grokbot-bridge needs Node 22 or newer/);
   assert.match(r.out, /brew upgrade node/);
   assert.deepEqual(globalInstall(await sb.calls()), []);
 });
@@ -119,40 +119,40 @@ test("FR1-B install.sh: an unwritable prefix is refused with the fix, never sudo
   }
 });
 
-test("FR1-B install.sh: REX_BOT_SOURCE=npm + REX_BOT_VERSION → npm i -g rex-bot-bridge@<version>; non-TTY prints Next", async () => {
+test("FR1-B install.sh: REX_GROKBOT_SOURCE=npm + REX_GROKBOT_VERSION → npm i -g rex-grokbot-bridge@<version>; non-TTY prints Next", async () => {
   const sb = await sandbox();
-  const r = sb.run({ REX_BOT_SOURCE: "npm", REX_BOT_VERSION: "0.3.0" });
+  const r = sb.run({ REX_GROKBOT_SOURCE: "npm", REX_GROKBOT_VERSION: "0.3.0" });
   assert.equal(r.status, 0, r.out);
   const calls = await sb.calls();
-  assert.ok(globalInstall(calls).some((c) => c.endsWith(" rex-bot-bridge@0.3.0")), calls.join("\n"));
+  assert.ok(globalInstall(calls).some((c) => c.endsWith(" rex-grokbot-bridge@0.3.0")), calls.join("\n"));
   assert.ok(!calls.some((c) => c.startsWith("curl")));
   assert.match(r.out, /✅ Installed rex-grokbot 0\.3\.0/);
   assert.match(r.stdout, /\nNext: rex-grokbot setup\n$/);
   assert.ok(!r.out.includes("Run rex-grokbot setup now?"), "no question without a terminal");
 });
 
-test("FR1-B install.sh: REX_BOT_SOURCE=github + ref → codeload URL for that ref, then npm i -g of the built tarball", async () => {
+test("FR1-B install.sh: REX_GROKBOT_SOURCE=github + ref → codeload URL for that ref, then npm i -g of the built tarball", async () => {
   const sb = await sandbox();
-  const r = sb.run({ REX_BOT_SOURCE: "github", REX_BOT_VERSION: "feat/some-ref" });
+  const r = sb.run({ REX_GROKBOT_SOURCE: "github", REX_GROKBOT_VERSION: "feat/some-ref" });
   assert.equal(r.status, 0, r.out);
   const calls = await sb.calls();
-  assert.ok(calls.includes("curl -fsSL https://codeload.github.com/smarzban/rex-bot-bridge/tar.gz/feat/some-ref"), calls.join("\n"));
+  assert.ok(calls.includes("curl -fsSL https://codeload.github.com/smarzban/rex-grokbot-bridge/tar.gz/feat/some-ref"), calls.join("\n"));
   assert.ok(calls.some((c) => c.startsWith("npm install --include=dev")), "local build install");
   assert.ok(calls.some((c) => c.startsWith("npm pack --pack-destination")));
-  assert.ok(globalInstall(calls).some((c) => /\/rex-bot-bridge-0\.3\.0\.tgz$/.test(c)), calls.join("\n"));
+  assert.ok(globalInstall(calls).some((c) => /\/rex-grokbot-bridge-0\.3\.0\.tgz$/.test(c)), calls.join("\n"));
 });
 
 test("FR1-B install.sh: no source given → npm when published (latest), GitHub main when not", async () => {
   const pub = await sandbox();
   pub.run({ STUB_PUBLISHED: "1" });
-  assert.ok(globalInstall(await pub.calls()).some((c) => c.endsWith(" rex-bot-bridge@latest")));
+  assert.ok(globalInstall(await pub.calls()).some((c) => c.endsWith(" rex-grokbot-bridge@latest")));
   const unpub = await sandbox();
   unpub.run();
-  assert.ok((await unpub.calls()).includes("curl -fsSL https://codeload.github.com/smarzban/rex-bot-bridge/tar.gz/main"));
+  assert.ok((await unpub.calls()).includes("curl -fsSL https://codeload.github.com/smarzban/rex-grokbot-bridge/tar.gz/main"));
   const bad = await sandbox();
-  const r = bad.run({ REX_BOT_SOURCE: "pypi" });
+  const r = bad.run({ REX_GROKBOT_SOURCE: "pypi" });
   assert.equal(r.status, 1);
-  assert.match(r.out, /REX_BOT_SOURCE must be npm or github/);
+  assert.match(r.out, /REX_GROKBOT_SOURCE must be npm or github/);
 });
 
 const UUID = "0f8e2c1a-1b2c-4d3e-8f90-123456789abc";
@@ -160,7 +160,7 @@ const UUID = "0f8e2c1a-1b2c-4d3e-8f90-123456789abc";
 test("FR1-F install.sh: npm's redacted prefix (***) resolves from NPM_CONFIG_PREFIX", async () => {
   const sb = await sandbox();
   const real = join(sb.dir, UUID, "pfx");
-  const r = sb.run({ STUB_PREFIX: real, STUB_PREFIX_SHOWN: join(sb.dir, "***", "pfx"), NPM_CONFIG_PREFIX: real, REX_BOT_SOURCE: "npm" });
+  const r = sb.run({ STUB_PREFIX: real, STUB_PREFIX_SHOWN: join(sb.dir, "***", "pfx"), NPM_CONFIG_PREFIX: real, REX_GROKBOT_SOURCE: "npm" });
   assert.equal(r.status, 0, r.out);
   assert.match(r.out, new RegExp(`✅ Installed rex-grokbot 0\\.3\\.0 \\(${real.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/bin/rex-grokbot\\)`));
   assert.ok(!r.out.includes("doesn't run"));
@@ -170,16 +170,17 @@ test("FR1-F install.sh: redacted prefix resolves from where npm lives when no en
   const sb = await sandbox({ npmInPrefix: true });
   // The stub npm lives in <prefix>/bin, and the prefix path has a UUID segment npm hides.
   const shown = sb.prefix.replace(/prefix$/, "***");
-  const r = sb.run({ STUB_PREFIX_SHOWN: shown, REX_BOT_SOURCE: "npm" });
+  const r = sb.run({ STUB_PREFIX_SHOWN: shown, REX_GROKBOT_SOURCE: "npm" });
   assert.equal(r.status, 0, r.out);
   assert.match(r.out, /✅ Installed rex-grokbot 0\.3\.0/);
 });
 
 test("FR1-F install.sh: an unresolvable redacted prefix says so and installs nothing", async () => {
   const sb = await sandbox();
-  const r = sb.run({ STUB_PREFIX_SHOWN: `/nowhere/***/pfx`, REX_BOT_SOURCE: "npm" });
+  const r = sb.run({ STUB_PREFIX_SHOWN: `/nowhere/***/pfx`, REX_GROKBOT_SOURCE: "npm" });
   assert.equal(r.status, 1);
   assert.match(r.out, /npm hid part of its global folder path \(it printed \/nowhere\/\*\*\*\/pfx\)/);
   assert.match(r.out, /Nothing was installed\. Set NPM_CONFIG_PREFIX/);
   assert.deepEqual(globalInstall(await sb.calls()), []);
 });
+

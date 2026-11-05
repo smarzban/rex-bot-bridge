@@ -11,20 +11,19 @@ import { childEnv, tempDir } from "./helpers.js";
 const run = promisify(execFile);
 const rexBotCli = join(import.meta.dirname, "../src/cli/rex-grokbot.ts");
 
-test("resolvePaths: state under ~/.config/rex-bot-bridge, init.lua via REX_CONFIG > XDG > ~/.config", () => {
+test("resolvePaths: state under ~/.config/rex-grokbot-bridge, init.lua via REX_CONFIG > XDG > ~/.config", () => {
   const p = resolvePaths({ HOME: "/h" });
-  assert.equal(p.stateDir, "/h/.config/rex-bot-bridge");
-  assert.equal(p.tokenFile, "/h/.config/rex-bot-bridge/token");
-  assert.equal(p.watchedFile, "/h/.config/rex-bot-bridge/watched");
-  assert.equal(p.heartbeatFile, "/h/.config/rex-bot-bridge/heartbeat");
-  assert.equal(p.configFile, "/h/.config/rex-bot-bridge/config.json");
-  assert.equal(p.logsDir, "/h/Library/Logs/rex-bot-bridge");
-  assert.equal(p.auditLog, "/h/.local/state/rex-bot-bridge/audit.log");
+  assert.equal(p.stateDir, "/h/.config/rex-grokbot-bridge");
+  assert.equal(p.tokenFile, "/h/.config/rex-grokbot-bridge/token");
+  assert.equal(p.watchedFile, "/h/.config/rex-grokbot-bridge/watched");
+  assert.equal(p.heartbeatFile, "/h/.config/rex-grokbot-bridge/heartbeat");
+  assert.equal(p.configFile, "/h/.config/rex-grokbot-bridge/config.json");
+  assert.equal(p.logsDir, "/h/Library/Logs/rex-grokbot-bridge");
+  assert.equal(p.auditLog, "/h/.local/state/rex-grokbot-bridge/audit.log");
   assert.equal(p.rexInitLua, "/h/.config/rex/init.lua");
-  assert.equal(p.legacyWatchedFile, "/h/.config/rex/bot-watch/sessions");
   assert.equal(resolvePaths({ HOME: "/h", XDG_CONFIG_HOME: "/x" }).rexInitLua, "/x/rex/init.lua");
   assert.equal(resolvePaths({ HOME: "/h", XDG_CONFIG_HOME: "/x", REX_CONFIG: "/r.lua" }).rexInitLua, "/r.lua");
-  assert.equal(resolvePaths({ HOME: "/h", REX_BOT_DIR: "/s" }).watchedFile, "/s/watched");
+  assert.equal(resolvePaths({ HOME: "/h", REX_GROKBOT_DIR: "/s" }).watchedFile, "/s/watched");
 });
 
 test("loadConfig: defaults, config.json, then env overrides; mode re-read per call", async () => {
@@ -35,8 +34,8 @@ test("loadConfig: defaults, config.json, then env overrides; mode re-read per ca
   const g = await loadConfig({ HOME: home, HOST: "0.0.0.0", PORT: "80" });
   assert.deepEqual([g.host, g.port], ["127.0.0.1", 7400]);
 
-  await mkdir(join(home, ".config/rex-bot-bridge"), { recursive: true });
-  const cfgFile = join(home, ".config/rex-bot-bridge/config.json");
+  await mkdir(join(home, ".config/rex-grokbot-bridge"), { recursive: true });
+  const cfgFile = join(home, ".config/rex-grokbot-bridge/config.json");
   await writeFile(cfgFile, JSON.stringify({ port: 7411, mode: "full" }));
   const f = await loadConfig({ HOME: home });
   assert.equal(f.port, 7411);
@@ -69,12 +68,12 @@ test("token: no token yet → stderr hint, exit 1, nothing on stdout, no file cr
   assert.equal(r.code, 1);
   assert.equal(r.stdout, "");
   assert.equal(r.stderr, "rex-grokbot: no token yet; run rex-grokbot setup\n");
-  await assert.rejects(stat(join(home, ".config/rex-bot-bridge/token")));
+  await assert.rejects(stat(join(home, ".config/rex-grokbot-bridge/token")));
 });
 
 test("token: prints exactly the token line and nothing else; --show is gone", async () => {
   const home = await tempDir();
-  const dir = join(home, ".config/rex-bot-bridge");
+  const dir = join(home, ".config/rex-grokbot-bridge");
   await mkdir(dir, { recursive: true, mode: 0o700 });
   const fake = "fake-test-token-0123456789abcdefghijklmnopqrstu";
   await writeFile(join(dir, "token"), fake + "\n", { mode: 0o600 });
@@ -89,7 +88,7 @@ test("serve refuses to start without a token", async () => {
   const home = await tempDir();
   const r = await cli(rexBotCli, ["serve"], { HOME: home, REX_BRIDGE_PORT: "1" });
   assert.equal(r.code, 1);
-  assert.match(r.stderr, /no token at .*\.config\/rex-bot-bridge\/token/);
+  assert.match(r.stderr, /no token at .*\.config\/rex-grokbot-bridge\/token/);
 });
 
 test("config set/get: secrets hidden unless --show, config.json is 600, stdin values", async () => {
@@ -105,7 +104,7 @@ test("config set/get: secrets hidden unless --show, config.json is 600, stdin va
   assert.equal((await cli(rexBotCli, ["config", "get", "webhook.key", "--show"], env)).stdout, "sekrit-key-xyz\n");
   assert.equal((await cli(rexBotCli, ["config", "get", "mode"], env)).stdout, "watched\n");
   assert.equal((await cli(rexBotCli, ["config", "set", "mode", "bogus"], env)).code, 1);
-  const cfg = join(home, ".config/rex-bot-bridge/config.json");
+  const cfg = join(home, ".config/rex-grokbot-bridge/config.json");
   assert.equal((await stat(cfg)).mode & 0o777, 0o600);
   assert.equal(JSON.parse(await readFile(cfg, "utf8")).webhook.key, "sekrit-key-xyz");
 });
@@ -144,18 +143,18 @@ test("CLI subprocesses get a scratch env: inherited REX_*/XDG/token overrides ne
   const saved = { ...process.env };
   process.env.REX_BRIDGE_TOKEN_FILE = join(home, "leaked-token");
   process.env.XDG_CONFIG_HOME = join(home, "leaked-xdg");
-  process.env.REX_BOT_DIR = join(home, "leaked-dir");
+  process.env.REX_GROKBOT_DIR = join(home, "leaked-dir");
   try {
     // Plain `token`, never --rotate here: the CLI uses the real launchctl, and --rotate would restart this
     // Mac's real bridge service (rotation is covered with a fake launchctl in credentials.test.ts).
-    await mkdir(join(home, ".config/rex-bot-bridge"), { recursive: true, mode: 0o700 });
-    await writeFile(join(home, ".config/rex-bot-bridge/token"), "fake-scratch-env-token\n", { mode: 0o600 });
+    await mkdir(join(home, ".config/rex-grokbot-bridge"), { recursive: true, mode: 0o700 });
+    await writeFile(join(home, ".config/rex-grokbot-bridge/token"), "fake-scratch-env-token\n", { mode: 0o600 });
     const r = await cli(rexBotCli, ["token"], { HOME: home });
     assert.equal(r.code, 0);
     assert.equal(r.stdout, "fake-scratch-env-token\n");
     await assert.rejects(stat(join(home, "leaked-token")));
   } finally {
-    for (const k of ["REX_BRIDGE_TOKEN_FILE", "XDG_CONFIG_HOME", "REX_BOT_DIR"]) {
+    for (const k of ["REX_BRIDGE_TOKEN_FILE", "XDG_CONFIG_HOME", "REX_GROKBOT_DIR"]) {
       if (saved[k] === undefined) delete process.env[k];
       else process.env[k] = saved[k];
     }

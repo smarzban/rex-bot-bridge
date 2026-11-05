@@ -1,20 +1,15 @@
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { join } from "node:path";
 import { isEphemeralInstall, isSandboxHome, type Ctx } from "./context.js";
 import { DOC_RAW_URL, DOC_URL } from "./grokbot.js";
-import { bootstrapCommand, installServices, LEGACY_LABELS, serviceState } from "./launchd.js";
+import { bootstrapCommand, installServices } from "./launchd.js";
 import type { Prompter } from "./prompt.js";
-import { installBlock, migrateBackups } from "./rexconfig.js";
-import { getJson } from "./doctor.js";
-import { ensurePrivateDir, legacyServePath, MODES, readSettings, settingsExist, writeSettings, type Mode, type Settings } from "./settings.js";
+import { installBlock } from "./rexconfig.js";
+import { ensurePrivateDir, MODES, readSettings, settingsExist, writeSettings, type Mode, type Settings } from "./settings.js";
 import { installSkills } from "./skills.js";
 import {
   bridgeOrigin,
-  legacyPathTarget,
-  legacyServeOffArgs,
-  legacyUrl,
   portTarget,
   serveArgs,
   servesDesired,
@@ -22,7 +17,6 @@ import {
   tailscaleStatus,
 } from "./tailscale.js";
 import { ensureToken } from "./token.js";
-import { parseWatched, WatchFile } from "./watch.js";
 
 /** The parts `rex-grokbot setup <part>` runs on their own. Bare `setup` runs them all (webhook is separate). */
 export const PARTS = ["rex", "services", "serve", "skill"] as const;
@@ -51,45 +45,11 @@ const SECTION_TITLES: Record<Part, string> = {
   skill: "Agent skill",
 };
 
-export const LEGACY_SESSION_LABELS = ["rex-bridge", "bot-watch"];
-
 const MODE_HELP = `Powers for the bot:
   watched  (recommended) the bot can only read, type into, and close panes in sessions you opted in
            (palette "Bot: Watch / Unwatch This Session" or \`rex-grokbot watch add <session>\`), plus new
            sessions it spawns. It can list every session.
   full     the bot can drive every Rex session on this Mac.`;
-
-/** Rex sessions whose label suggests a v1 bridge/watcher started by hand. */
-export async function legacySessions(ctx: Ctx): Promise<string[]> {
-  const r = await ctx.rex(["ls", "--json"]).catch(() => null);
-  if (!r || r.code !== 0) return [];
-  try {
-    const j = JSON.parse(r.stdout) as { sessions?: { session_id: string; label?: string }[] };
-    return (j.sessions ?? []).filter((s) => s.label && LEGACY_SESSION_LABELS.includes(s.label)).map((s) => `${s.label} (${s.session_id})`);
-  } catch {
-    return [];
-  }
-}
-
-export async function legacyServices(ctx: Ctx): Promise<string[]> {
-  const out: string[] = [];
-  for (const label of LEGACY_LABELS) if ((await serviceState(label, ctx.launchctl)).loaded) out.push(label);
-  return out;
-}
-
-/** Imports v1 opt-in ids into `watched`; returns the ids that were added. The old file is left alone. */
-export async function migrateWatched(legacyFile: string, watchedFile: string): Promise<string[]> {
-  let content: string;
-  try {
-    content = await readFile(legacyFile, "utf8");
-  } catch {
-    return [];
-  }
-  const watch = new WatchFile(watchedFile);
-  const added: string[] = [];
-  for (const id of parseWatched(content)) if (await watch.add(id)) added.push(id);
-  return added;
-}
 
 /** One printer per run: numbered section headers, and ✅/⚠️/❌ lines with an optional fix line. */
 function printer(ctx: Ctx) {
@@ -117,11 +77,11 @@ async function checks(ctx: Ctx, out: Printer, needRex: boolean): Promise<boolean
   out.section("Checks");
   const major = Number(process.versions.node.split(".")[0]);
   if (major < 22) {
-    out.fail(`Node ${process.versions.node} is too old; rex-bot-bridge needs Node 22 or newer.`, "Install Node 22+, then re-run");
+    out.fail(`Node ${process.versions.node} is too old; rex-grokbot-bridge needs Node 22 or newer.`, "Install Node 22+, then re-run");
     return false;
   }
   out.ok(`Node ${process.versions.node}`);
-  if (process.platform !== "darwin") out.warn("rex-bot-bridge services are built for macOS; other platforms are untested.");
+  if (process.platform !== "darwin") out.warn("rex-grokbot-bridge services are built for macOS; other platforms are untested.");
   if (!needRex) return true;
   if (!ctx.rexBin) {
     out.fail("rex not found on PATH.", "Install Rex and make sure `command -v rex` works (or set REX_BIN)");
@@ -140,7 +100,7 @@ async function checks(ctx: Ctx, out: Printer, needRex: boolean): Promise<boolean
   return true;
 }
 
-/** Section 2 (bare setup only): state dir, token, mode, v1 import. */
+/** Section 2 (bare setup only): state dir, token, mode. */
 async function settingsSection(ctx: Ctx, out: Printer, flags: SetupFlags, p: Prompter): Promise<Settings> {
   const { paths } = ctx;
   out.section("Settings");
@@ -150,18 +110,6 @@ async function settingsSection(ctx: Ctx, out: Printer, flags: SetupFlags, p: Pro
 
   const hadSettings = await settingsExist(paths.configFile);
   const s = await readSettings(paths.configFile);
-
-  // The v1 list is imported once. Re-importing on every run would give the bot back sessions the
-  // human has since unwatched, so a recorded import or an existing v2 list means it's skipped.
-  if (!s.migratedV1At && existsSync(paths.legacyWatchedFile)) {
-    if (!existsSync(paths.watchedFile)) {
-      const migrated = await migrateWatched(paths.legacyWatchedFile, paths.watchedFile);
-      if (migrated.length) out.ok(`Imported ${migrated.length} watched session(s) from ${paths.legacyWatchedFile} (that file was left in place).`);
-    } else {
-      out.note(`${paths.watchedFile} already exists, so the v1 list ${paths.legacyWatchedFile} was not imported.`);
-    }
-    s.migratedV1At = new Date().toISOString();
-  }
 
   if (flags.mode) {
     s.mode = flags.mode;
@@ -179,17 +127,12 @@ async function settingsSection(ctx: Ctx, out: Printer, flags: SetupFlags, p: Pro
 
 async function rexSection(ctx: Ctx, out: Printer): Promise<void> {
   const { paths } = ctx;
-  const actionsPath = join(ctx.pkgRoot, "lua/rex-bot-actions.lua");
+  const actionsPath = join(ctx.pkgRoot, "lua/rex-grokbot-actions.lua");
   const r = await installBlock({ initPath: paths.rexInitLua, backupsDir: paths.backupsDir, actionsPath, rex: ctx.rex }).catch(
     (e: Error) => ({ status: "error" as const, detail: e.message }),
   );
   if (r.status === "error") {
     out.fail(r.detail, "rex-grokbot setup rex");
-  } else if (r.status === "legacy-inline") {
-    out.warn(
-      `${paths.rexInitLua} already defines bot_watch_toggle / bot_watch_list inline (v1).`,
-      "Remove that old block by hand (the two rex.action{…} entries and their helpers), then: rex-grokbot setup rex",
-    );
   } else if (r.status === "check-failed") {
     out.fail(`rex config check failed after editing ${paths.rexInitLua}; restored the previous file.\n${r.detail}`, `Fix ${paths.rexInitLua} (rex config check), then: rex-grokbot setup rex`);
   } else {
@@ -208,21 +151,10 @@ async function rexSection(ctx: Ctx, out: Printer): Promise<void> {
 
 async function servicesSection(ctx: Ctx, out: Printer, s: Settings, p: Prompter): Promise<boolean> {
   const { paths } = ctx;
-  const oldServices = await legacyServices(ctx);
-  if (oldServices.length) {
-    out.warn(
-      `v1 launchd services are loaded: ${oldServices.join(", ")}. Stop them so they don't fight over port ${s.port}.`,
-      oldServices.map((l) => `launchctl bootout gui/$(id -u)/${l}`).join("\n"),
-    );
-  }
-  const oldSessions = await legacySessions(ctx);
-  if (oldSessions.length) {
-    out.warn(`Rex sessions that look like a v1 bridge/watcher are running: ${oldSessions.join(", ")}.`, "Close them yourself once the new services are up");
-  }
   if (isEphemeralInstall(ctx.pkgRoot)) {
     out.warn(
-      "rex-bot-bridge is running from an npx cache; services must point at a stable install.",
-      "curl -fsSL https://raw.githubusercontent.com/smarzban/rex-bot-bridge/main/install.sh | sh",
+      "rex-grokbot-bridge is running from an npx cache; services must point at a stable install.",
+      "curl -fsSL https://raw.githubusercontent.com/smarzban/rex-grokbot-bridge/main/install.sh | sh",
     );
     if (!(await p.confirm("Install services pointing at this npx cache anyway?", false))) {
       out.warn("Services not installed.", "rex-grokbot setup services (from a global install)");
@@ -296,42 +228,12 @@ async function serveSection(ctx: Ctx, out: Printer, s: Settings, p: Prompter): P
     out.ok(`${origin} → ${desired}`);
     out.note(`Connector URL: ${origin}/mcp (rex-grokbot url)`);
   }
-  await migrateLegacyServe(ctx, out, s, p, ts.dnsName, origin, desired);
   return true;
-}
-
-/**
- * ≤ 0.4 mapped `/rex-bridge` on :443, an origin other apps share (and whose OAuth metadata can hijack the
- * connector). Once the port mapping answers, offer to remove that path, only when it proxies to our bridge.
- * `/`, other paths, and a foreign or unreadable mapping are never touched.
- */
-async function migrateLegacyServe(ctx: Ctx, out: Printer, s: Settings, p: Prompter, dnsName: string | undefined, origin: string, desired: string) {
-  const path = legacyServePath(s);
-  if (!servesDesired(await legacyPathTarget(ctx.tailscale, path), desired)) return;
-  const offCmd = shellCommand("tailscale", legacyServeOffArgs(path));
-  out.warn(`The old mapping ${legacyUrl(dnsName, path)} → ${desired} (0.4 and earlier) is still on port 443, which other apps share.`);
-  const health = await getJson(ctx.fetch, `${origin}/healthz`, 8000);
-  if (!(health.status === 200 && health.body?.ok === true)) {
-    out.warn(`Kept it for now: ${origin}/healthz didn't answer (${health.error ?? `HTTP ${health.status}`}), so the new mapping isn't confirmed working.`, `once rex-grokbot doctor is green: ${offCmd}`);
-    return;
-  }
-  if (!(await p.confirm(`Remove the old ${path} mapping on port 443 (only that path)?`, true))) {
-    out.warn("Old mapping left in place.", offCmd);
-    return;
-  }
-  const r = await ctx.tailscale(legacyServeOffArgs(path));
-  if (r.code !== 0) {
-    out.fail(`removing the old mapping failed: ${(r.stderr || r.stdout).trim()}`, offCmd);
-    return;
-  }
-  out.ok(`Removed the old mapping ${legacyUrl(dnsName, path)}`);
-  out.note(`The connector URL changed: set the rex connector in Grok Bot to ${origin}/mcp`);
 }
 
 async function skillSection(ctx: Ctx, out: Printer): Promise<void> {
   const r = await installSkills(ctx.paths.skillRoots);
   for (const f of r.installed) out.ok(`Installed: ${f}`);
-  for (const f of r.legacyRemoved) out.ok(`Removed the old rex-bot skill: ${f}`);
   for (const k of r.skipped) out.note(`Not installed at ${k.path}: ${k.reason}`);
   if (!r.installed.length) out.warn("No agent skill installed (needs ~/.claude or ~/.agents).");
 }
@@ -342,12 +244,9 @@ async function skillSection(ctx: Ctx, out: Printer): Promise<void> {
  */
 export async function setup(ctx: Ctx, flags: SetupFlags, p: Prompter, part?: Part): Promise<number> {
   const out = printer(ctx);
-  ctx.out(part ? `rex-bot-bridge setup: ${SECTION_TITLES[part].toLowerCase()}\n` : "rex-bot-bridge setup\n");
+  ctx.out(part ? `rex-grokbot-bridge setup: ${SECTION_TITLES[part].toLowerCase()}\n` : "rex-grokbot-bridge setup\n");
   const needRex = !part || part === "rex" || part === "services";
   if (!(await checks(ctx, out, needRex))) return 1;
-  // 0.2.x kept init.lua backups inside the state dir, which `uninstall --purge` deletes: move them out.
-  const migrated = await migrateBackups(ctx.paths.legacyBackupsDir, ctx.paths.backupsDir);
-  if (migrated.length) out.ok(`Moved ${migrated.length} init.lua backup(s) to ${ctx.paths.backupsDir}`);
 
   if (part) {
     const s = await readSettings(ctx.paths.configFile);

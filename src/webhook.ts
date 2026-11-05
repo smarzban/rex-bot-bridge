@@ -108,7 +108,7 @@ export function webhookHint(r: PostResult): string {
   return "Check the routine's webhook URL and key: rex-grokbot setup webhook";
 }
 
-/** POSTs a doctor_test event (the routine instructions answer it with "rex-bot-bridge webhook OK"). */
+/** POSTs a doctor_test event (the routine instructions answer it with "rex-grokbot-bridge webhook OK"). */
 export async function testWebhook(ctx: Ctx, s: Settings, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<PostResult> {
   return postWebhook(s.webhook, enrich({ event: "doctor_test" }), { logFile: ctx.paths.notifyLog, fetch: ctx.fetch, timeoutMs });
 }
@@ -238,7 +238,7 @@ export async function setupWebhook(ctx: Ctx, flags: WebhookFlags, p: Prompter, o
   }
   const r = await testWebhook(ctx, s, opts.timeoutMs);
   if (r.ok) {
-    ok(`Test sent: ${describe(r)}. Your routine should run and reply "rex-bot-bridge webhook OK".`);
+    ok(`Test sent: ${describe(r)}. Your routine should run and reply "rex-grokbot-bridge webhook OK".`);
     say("\nNext: rex-grokbot doctor --test-webhook");
     return 0;
   }

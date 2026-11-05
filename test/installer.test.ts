@@ -13,7 +13,6 @@ import type { Runner } from "../src/rex.js";
 import {
   BLOCK_END,
   BLOCK_START,
-  hasLegacyInline,
   inspectBlock,
   installBlock,
   luaString,
@@ -23,9 +22,8 @@ import {
   upsertBlock,
 } from "../src/rexconfig.js";
 import { readSettings, setKey, writeSettings, DEFAULTS } from "../src/settings.js";
-import { migrateWatched } from "../src/setup.js";
 import { installSkills, uninstallSkills, SKILL_MARKER } from "../src/skills.js";
-import { legacyPathTarget, portTarget } from "../src/tailscale.js";
+import { portTarget } from "../src/tailscale.js";
 import { childEnv, tempDir } from "./helpers.js";
 
 const execFileP = promisify(execFile);
@@ -47,7 +45,6 @@ test("settings: write creates dir 700 and file 600; read merges defaults", async
   assert.equal(s.mode, "full");
   assert.equal(s.port, 7412);
   assert.equal(s.servePort, 8443);
-  assert.equal(s.servePath, undefined, "new installs have no legacy path");
 });
 
 test("settings: setKey validates", () => {
@@ -66,7 +63,7 @@ test("settings: setKey validates", () => {
 
 // ---------- init.lua block ----------
 
-const ACTIONS = "/Users/Some One/lib/node_modules/rex-bot-bridge/lua/rex-bot-actions.lua";
+const ACTIONS = "/Users/Some One/lib/node_modules/rex-grokbot-bridge/lua/rex-grokbot-actions.lua";
 
 test("init.lua block: insert into empty/existing, replace in place, remove restores the original", () => {
   const block = renderBlock(ACTIONS);
@@ -88,13 +85,9 @@ test("init.lua block: insert into empty/existing, replace in place, remove resto
   assert.throws(() => upsertBlock(`${BLOCK_START}\nno end`, block), /without/);
 });
 
-test("init.lua block: Lua string escaping and legacy inline detection", () => {
+test("init.lua block: Lua string escaping", () => {
   assert.equal(luaString('/a "b"\\c'), '"/a \\"b\\"\\\\c"');
   assert.throws(() => luaString("/a\nb"), /control/);
-  const legacy = 'rex.action{\n  name = "bot_watch_toggle",\n  title = "x",\n}\n';
-  assert.equal(hasLegacyInline(legacy), true);
-  assert.equal(hasLegacyInline(renderBlock(ACTIONS)), false);
-  assert.equal(hasLegacyInline("-- nothing\n"), false);
 });
 
 /** Fake `rex config check`: fails when the file contains FAIL_MARK. Records calls. */
@@ -127,7 +120,7 @@ test("init.lua install: backs up, writes, checks with `rex config check <path>`,
   assert.ok("backup" in r1 && r1.backup);
   assert.equal(await readFile((r1 as { backup: string }).backup, "utf8"), original);
   assert.equal(await readFile(initPath, "utf8"), `${original}\n${renderBlock(ACTIONS)}`);
-  assert.deepEqual(await inspectBlock(initPath), { present: true, actionsPath: ACTIONS, legacy: false });
+  assert.deepEqual(await inspectBlock(initPath), { present: true, actionsPath: ACTIONS });
 
   assert.equal((await installBlock({ initPath, backupsDir, rex, actionsPath: ACTIONS })).status, "unchanged");
 
@@ -163,20 +156,6 @@ test("init.lua install: a missing init.lua is created, and deleted again if the 
   await assert.rejects(readFile(initPath2));
 });
 
-test("init.lua install: refuses to add the block when v1 actions are defined inline", async () => {
-  const dir = await tempDir();
-  const initPath = join(dir, "init.lua");
-  const legacy = 'rex.action{ name = "bot_watch_list", title = "x", run = function() end }\n';
-  await writeFile(initPath, legacy);
-  const calls: string[][] = [];
-  const r = await installBlock({ initPath, backupsDir: join(dir, "b"), rex: fakeRex(calls), actionsPath: ACTIONS });
-  assert.equal(r.status, "legacy-inline");
-  assert.equal(await readFile(initPath, "utf8"), legacy, "user code untouched");
-  assert.equal(calls.length, 0);
-});
-
-// ---------- launchd ----------
-
 test("plists: paths with spaces and XML specials are escaped and pass plutil -lint", async () => {
   const home = join(await tempDir(), "Some One & Co");
   const paths = resolvePaths({ HOME: home });
@@ -184,17 +163,17 @@ test("plists: paths with spaces and XML specials are escaped and pass plutil -li
   const specs = serviceSpecs({
     paths,
     node: "/opt/node <22>/bin/node",
-    cli: "/lib/node_modules/rex-bot-bridge/dist/cli/rex-grokbot.js",
+    cli: "/lib/node_modules/rex-grokbot-bridge/dist/cli/rex-grokbot.js",
     rexBin,
-    pkgRoot: "/lib/node_modules/rex-bot-bridge",
+    pkgRoot: "/lib/node_modules/rex-grokbot-bridge",
     rexServer: "unix:///Users/x/Library/Application%20Support/rex/server.sock",
   });
   assert.equal(specs.watch.env.REX_SERVER, "unix:///Users/x/Library/Application%20Support/rex/server.sock");
-  assert.deepEqual(specs.bridge.programArguments.slice(1), ["/lib/node_modules/rex-bot-bridge/dist/cli/rex-grokbot.js", "serve"]);
-  assert.deepEqual(specs.watch.programArguments.slice(1), ["/lib/node_modules/rex-bot-bridge/dist/cli/rex-grokbot.js", "watch"]);
+  assert.deepEqual(specs.bridge.programArguments.slice(1), ["/lib/node_modules/rex-grokbot-bridge/dist/cli/rex-grokbot.js", "serve"]);
+  assert.deepEqual(specs.watch.programArguments.slice(1), ["/lib/node_modules/rex-grokbot-bridge/dist/cli/rex-grokbot.js", "watch"]);
   assert.equal(specs.bridge.env.REX_BIN, rexBin);
   assert.ok(specs.bridge.env.PATH!.startsWith(rexBin.replace(/\/rex$/, "") + ":"));
-  assert.equal(specs.watch.log, join(home, "Library/Logs/rex-bot-bridge/watch.log"));
+  assert.equal(specs.watch.log, join(home, "Library/Logs/rex-grokbot-bridge/watch.log"));
 
   const outDir = await tempDir();
   for (const spec of Object.values(specs)) {
@@ -211,7 +190,7 @@ test("plists: paths with spaces and XML specials are escaped and pass plutil -li
     const json = JSON.parse((await execFileP("/usr/bin/plutil", ["-convert", "json", "-o", "-", file])).stdout);
     assert.equal(json.EnvironmentVariables.REX_BIN, rexBin);
     assert.equal(json.ProgramArguments[0], "/opt/node <22>/bin/node");
-    assert.equal(json.WorkingDirectory, "/lib/node_modules/rex-bot-bridge");
+    assert.equal(json.WorkingDirectory, "/lib/node_modules/rex-grokbot-bridge");
   }
 });
 
@@ -325,7 +304,7 @@ test("notify/say CLI: stdout and stderr never contain the URL or key", async () 
       assert.ok(!(r.stdout + r.stderr).includes("SECRET-PATH"));
       assert.ok(!(r.stdout + r.stderr).includes(KEY));
     }
-    const log = await readFile(join(home, "Library/Logs/rex-bot-bridge/notify.log"), "utf8");
+    const log = await readFile(join(home, "Library/Logs/rex-grokbot-bridge/notify.log"), "utf8");
     assert.ok(!log.includes("SECRET-PATH") && !log.includes(KEY));
   } finally {
     await s.close();
@@ -333,23 +312,6 @@ test("notify/say CLI: stdout and stderr never contain the URL or key", async () 
 });
 
 // ---------- migration ----------
-
-test("migration: imports v1 ids into watched, keeps existing entries, leaves the old file", async () => {
-  const dir = await tempDir();
-  const legacy = join(dir, "sessions");
-  const watched = join(dir, "state/watched");
-  const v1 = "# v1\nsession:aaaa0000-0001 # main\n\nsession:bbbb0000-0002\n";
-  await writeFile(legacy, v1);
-  await mkdir(join(dir, "state"));
-  await writeFile(watched, "session:bbbb0000-0002\n");
-  assert.deepEqual(await migrateWatched(legacy, watched), ["session:aaaa0000-0001"]);
-  assert.equal(await readFile(watched, "utf8"), "session:bbbb0000-0002\nsession:aaaa0000-0001\n");
-  assert.equal(await readFile(legacy, "utf8"), v1);
-  assert.deepEqual(await migrateWatched(legacy, watched), [], "idempotent");
-  assert.deepEqual(await migrateWatched(join(dir, "missing"), watched), []);
-});
-
-// ---------- skills ----------
 
 test("skills: installed only under existing roots; uninstall removes only ours", async () => {
   const home = await tempDir();
@@ -372,16 +334,6 @@ test("skills: installed only under existing roots; uninstall removes only ours",
 });
 
 // ---------- tailscale ----------
-
-test("tailscale: legacyPathTarget reads the :443 handler for the path", async () => {
-  const status = { Web: { "mac.tail.ts.net:443": { Handlers: { "/rex-bridge": { Proxy: "http://127.0.0.1:7400" } } } } };
-  const ts: Runner = async () => ({ stdout: JSON.stringify(status), stderr: "", code: 0 });
-  assert.deepEqual(await legacyPathTarget(ts, "/rex-bridge"), { kind: "occupied", target: "http://127.0.0.1:7400" });
-  assert.deepEqual(await legacyPathTarget(ts, "/other"), { kind: "absent" });
-  assert.deepEqual(await portTarget(ts, 8443), { kind: "absent" }, "a :443 path is not the port mapping");
-  const empty: Runner = async () => ({ stdout: "{}", stderr: "", code: 0 });
-  assert.deepEqual(await legacyPathTarget(empty, "/rex-bridge"), { kind: "absent" });
-});
 
 test("launchd uninstall: only boots out services whose plist is in this HOME", async () => {
   const { uninstallServices, installServices, LABELS } = await import("../src/launchd.js");

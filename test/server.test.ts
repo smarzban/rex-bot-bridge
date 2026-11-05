@@ -39,7 +39,7 @@ test("auth: good token -> 200", async () => {
   assert.equal(r.status, 200);
 });
 
-test("auth: prefixed path (legacy tailscale serve --set-path) works too", async () => {
+test("auth: a path prefix in front of /mcp (a proxy that adds one) works too", async () => {
   const r = await fetch(bridge.url + "/rex-bridge/mcp", { method: "POST", body: initBody });
   assert.equal(r.status, 401);
 });
@@ -47,7 +47,7 @@ test("auth: prefixed path (legacy tailscale serve --set-path) works too", async 
 test("T431 auth: the 401 on /mcp is a plain Bearer challenge with no resource_metadata", async () => {
   const r = await post({});
   assert.equal(r.status, 401);
-  assert.equal(r.headers.get("www-authenticate"), 'Bearer realm="rex-bot-bridge"');
+  assert.equal(r.headers.get("www-authenticate"), 'Bearer realm="rex-grokbot-bridge"');
   assert.deepEqual(await r.json(), { error: "unauthorized" });
 });
 
