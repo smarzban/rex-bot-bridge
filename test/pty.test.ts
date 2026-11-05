@@ -61,9 +61,10 @@ test("T429 pty: setup asks only the mode, prints numbered sections and ends with
   assert.equal(r.error, null, r.output);
   assert.equal(r.code, 0, r.output);
   assert.ok(!/webhook url|webhook key|bearer token/i.test(r.output), "no webhook or token questions");
+  assert.ok(!/webhook not set/i.test(r.output), "no webhook warning on a fresh install");
   assert.match(r.output, /6\. Agent skill/);
   assert.match(r.output, /Next\r?\n {2}1\. Set up Grok Bot: https:\/\/github\.com\/smarzban\/rex-bot-bridge\/blob\/main\/docs\/grok-bot\.md/);
-  assert.match(r.output, /3\. Check everything: rex-bot doctor --test-webhook\s*$/);
+  assert.match(r.output, /3\. Check everything: rex-grokbot doctor --test-webhook\s*$/);
 });
 
 test("T429 pty: setup webhook — key questions visible, typed and pasted keys never shown, test post 200, echo restored", { skip }, async () => {

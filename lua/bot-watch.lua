@@ -1,11 +1,11 @@
 -- bot-watch.lua: forward agent status changes in opted-in Rex sessions to the coordinator's webhook.
 --
--- Started by `rex-bot watch` (the com.rexbotbridge.watch launchd service), which runs
+-- Started by `rex-grokbot watch` (the com.rexbotbridge.watch launchd service), which runs
 --   rex do --all <package>/lua/bot-watch.lua
 -- with these environment variables set:
 --   REX_BOT_DIR   state dir holding `watched` (opt-in list) and `heartbeat`
 --   REX_BOT_NODE  absolute path of node
---   REX_BOT_CLI   absolute path of dist/cli/rex-bot.js (its `notify` command POSTs stdin to the webhook)
+--   REX_BOT_CLI   absolute path of dist/cli/rex-grokbot.js (its `notify` command POSTs stdin to the webhook)
 --
 -- Fires when a pane's program status *enters* done / blocked / error and stays there for DEBOUNCE
 -- seconds. Works for any program that speaks OSC 7501 (Claude Code and Pi do natively).
@@ -21,7 +21,7 @@ local DEBOUNCE = tonumber(os.getenv("BOT_WATCH_DEBOUNCE") or "") or 3
 local NOTIFY_STATES = { done = true, blocked = true, error = true }
 
 if not CLI or CLI == "" then
-  error("REX_BOT_CLI is not set; start the watcher with `rex-bot watch`", 0)
+  error("REX_BOT_CLI is not set; start the watcher with `rex-grokbot watch`", 0)
 end
 
 local function read_file(path)
@@ -134,7 +134,7 @@ rex.on("block_closed", function(ctx, ev)
   end
 end)
 
--- Heartbeat so `rex-bot doctor` and the bridge's /healthz can tell the watcher is alive.
+-- Heartbeat so `rex-grokbot doctor` and the bridge's /healthz can tell the watcher is alive.
 -- Written to a 0600 temp file (chmod before any content), then renamed over the old one.
 local function beat()
   local tmp = HEARTBEAT_FILE .. ".tmp"

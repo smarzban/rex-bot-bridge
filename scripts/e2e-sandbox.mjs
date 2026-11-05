@@ -17,7 +17,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 
 const run = promisify(execFile);
 const ROOT = resolve(import.meta.dirname, "..");
-const CLI = join(ROOT, "dist/cli/rex-bot.js");
+const CLI = join(ROOT, "dist/cli/rex-grokbot.js");
 const PORT = Number(process.env.E2E_PORT || 7412);
 const REX = process.env.REX_BIN || "rex";
 
@@ -34,14 +34,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 {
   const b = await run("npm", ["run", "build", "--loglevel=error"], { cwd: ROOT, timeout: 180_000 }).then(() => true, (e) => (console.log(e.stdout, e.stderr), false));
   check(b, "npm run build");
-  for (const f of ["dist/cli/rex-bot.js", "dist/cli/bridge.js"]) {
+  for (const f of ["dist/cli/rex-grokbot.js"]) {
     const m = ((await stat(join(ROOT, f)).catch(() => null))?.mode ?? 0) & 0o777;
     check((m & 0o111) !== 0, `after npm run build, ${f} is executable (mode ${m.toString(8)})`);
   }
 }
 
 // ---- sandbox ----
-const SB = await mkdtemp(join(tmpdir(), "rex-bot-sandbox-"));
+const SB = await mkdtemp(join(tmpdir(), "rex-grokbot-sandbox-"));
 const env = { ...process.env, HOME: SB, XDG_CONFIG_HOME: join(SB, ".config") };
 // Like launchd: no Rex pane context. rex finds its server socket via HOME, which is the sandbox here, so
 // point it at the real server explicitly (what the generated plists do when setup knows REX_SERVER).
@@ -106,14 +106,17 @@ try {
   check(setupRes.code === 0, `setup exit ${setupRes.code} ${setupRes.stderr.trim()}`);
   const token = (await readFile(join(SB, ".config/rex-bot-bridge/token"), "utf8")).trim();
   check(!setupRes.stdout.includes(token) && !setupRes.stderr.includes(token), "setup output never shows the token");
-  check(setupRes.stdout.trimEnd().endsWith("3. Check everything: rex-bot doctor --test-webhook"), "setup ends with the Next block");
+  check(setupRes.stdout.trimEnd().endsWith("3. Check everything: rex-grokbot doctor --test-webhook"), "setup ends with the Next block");
   const hook = await cli(["setup", "webhook", "--url", SINK_URL, "--key-file", keyFile, "--yes"]);
   console.log(hook.stdout.trim());
   check(hook.code === 0 && hook.stdout.includes("Test sent: HTTP 200"), `setup webhook saved and test-posted (exit ${hook.code}) ${hook.stderr.trim()}`);
   check(!(hook.stdout + hook.stderr).includes(KEY) && !(hook.stdout + hook.stderr).includes("e2e-sink-path"), "setup webhook output never shows the webhook URL/key");
   check(!!(await waitFor((r) => r.body?.event === "doctor_test" && r.auth === `Bearer ${KEY}`, 3000)), "sink got the setup webhook test post with Bearer <key>");
+  check(!/webhook not set/i.test(setupRes.stdout + setupRes.stderr), "setup no longer warns that the webhook isn't set");
+  const tk = await cli(["token"]);
+  check(tk.code === 0 && tk.stdout === `${token}\n` && tk.stderr === "", "token prints exactly the token line");
   const gb = await cli(["grokbot"]);
-  check(gb.stdout.includes("<TOKEN>") && gb.stdout.includes("rex-bot grokbot --show-token") && gb.stdout.includes("docs/grok-bot.md") && !gb.stdout.includes(token), "grokbot prints the connector message with a token placeholder and the guide link");
+  check(gb.code === 2 && !gb.stdout.includes(token), "the grokbot command is gone");
   const stateDir = join(SB, ".config/rex-bot-bridge");
   check(((await stat(stateDir)).mode & 0o777) === 0o700, "state dir is 700");
   for (const f of ["token", "config.json"]) check(((await stat(join(stateDir, f))).mode & 0o777) === 0o600, `${f} is 600`);
@@ -122,7 +125,7 @@ try {
   check((await readdir(join(SB, ".config/rex/rex-bot-backups"))).length === 1, "init.lua backed up next to init.lua");
   check((await readFile(join(stateDir, "watched"), "utf8")).includes(V1_ID), "v1 opt-in list migrated");
   for (const root of [".claude", ".agents"]) {
-    const skill = await readFile(join(SB, root, "skills/rex-bot/SKILL.md"), "utf8").catch(() => "");
+    const skill = await readFile(join(SB, root, "skills/rex-grokbot/SKILL.md"), "utf8").catch(() => "");
     check(skill.includes("installed-by: rex-bot-bridge"), `skill installed in ${root}`);
   }
   check((await cli(["config", "set", "port", String(PORT)])).code === 0, `port set to ${PORT}`);
@@ -137,7 +140,13 @@ try {
   for (const id of ["node", "rex", "rex_server", "token", "mode", "rex_actions", "webhook", "skills", "tailscale"]) {
     check(level[id] === "ok", `doctor ${id} ok`);
   }
-  for (const id of ["service_bridge", "service_watch", "serve"]) check(level[id] === "warn", `doctor ${id} skipped (warn)`);
+  // launchd isn't sandboxed by HOME: if this Mac already runs the real services, doctor (rightly) sees them.
+  for (const [id, label] of [["service_bridge", "com.rexbotbridge.bridge"], ["service_watch", "com.rexbotbridge.watch"]]) {
+    const realLoaded = await run("/bin/launchctl", ["print", `gui/${process.getuid()}/${label}`]).then(() => true, () => false);
+    if (realLoaded) check(level[id] === "ok" || level[id] === "fail", `doctor ${id}: this Mac's real ${label} is loaded, so doctor reports it (${level[id]})`);
+    else check(level[id] === "warn", `doctor ${id} skipped (warn)`);
+  }
+  check(level.serve === "warn", "doctor serve skipped (warn)");
   check(report.checks.every((c) => c.level !== "fail") && doc.code === 0, `doctor: no failures (exit ${doc.code})`);
 
   // ---- 3. bridge + watcher by hand ----
@@ -181,7 +190,7 @@ try {
   const otherS = await mk(`e2e-sandbox-${tag}-other`);
   await chmod(join(stateDir, "watched"), 0o644); // as a pre-0.2.0 install would have left it
   const add = await cli(["watch", "add", watchedS.session_id]);
-  check(add.stdout.startsWith("watching"), `rex-bot watch add: ${add.stdout.trim()}`);
+  check(add.stdout.startsWith("watching"), `rex-grokbot watch add: ${add.stdout.trim()}`);
   const wMode = (await stat(join(stateDir, "watched")).catch(() => null))?.mode & 0o777;
   check(wMode === 0o600, `watched tightened from 0644 to 0600 on write (got ${wMode?.toString(8)})`);
   await sleep(1500); // let the shells start
@@ -225,7 +234,7 @@ try {
 
   // say
   const say = await cli(["say", "hello from the sandbox"], { env: { REX_SESSION: watchedS.session_id, REX_BLOCK: watchedS.block_id } });
-  check(say.code === 0 && /sent/.test(say.stderr), `rex-bot say: ${say.stderr.trim()}`);
+  check(say.code === 0 && /sent/.test(say.stderr), `rex-grokbot say: ${say.stderr.trim()}`);
   const msg = await waitFor((r) => r.body?.event === "agent_message", 3000);
   check(msg?.body.text === "hello from the sandbox" && msg.body.rex_session === watchedS.session_id, "sink got agent_message");
   const notifyLog = await readFile(join(SB, "Library/Logs/rex-bot-bridge/notify.log"), "utf8").catch(() => "");
@@ -269,7 +278,7 @@ console.log(un.stdout.trim());
 check(un.code === 0, `uninstall exit ${un.code}`);
 check((await readFile(join(SB, ".config/rex/init.lua"), "utf8")) === userInit, "init.lua restored to the user's original");
 for (const root of [".claude", ".agents"]) {
-  check(!(await stat(join(SB, root, "skills/rex-bot")).catch(() => null)), `skill removed from ${root}`);
+  check(!(await stat(join(SB, root, "skills/rex-grokbot")).catch(() => null)), `skill removed from ${root}`);
 }
 check(!!(await stat(join(SB, ".config/rex-bot-bridge/token")).catch(() => null)), "state dir kept without --purge");
 check(!/Services stopped/.test(un.stdout), "uninstall did not touch launchd (no plists in the sandbox)");
@@ -300,21 +309,31 @@ check((await readdir(join(SB, ".config/rex/rex-bot-backups")).catch(() => [])).l
     (r) => r.stdout.trim().split("\n").pop(),
     (e) => (console.log(e.stderr), null),
   );
-  check(!!packed && !!(await stat(join(copy, "dist/cli/rex-bot.js")).catch(() => null)), `npm pack ran prepare (built dist/) and produced ${packed}`);
-  for (const f of ["dist/cli/rex-bot.js", "dist/cli/bridge.js"]) {
+  check(!!packed && !!(await stat(join(copy, "dist/cli/rex-grokbot.js")).catch(() => null)), `npm pack ran prepare (built dist/) and produced ${packed}`);
+  for (const f of ["dist/cli/rex-grokbot.js"]) {
     const m = ((await stat(join(copy, f)).catch(() => null))?.mode ?? 0) & 0o777;
     check((m & 0o111) !== 0, `prepare's build left ${f} executable (mode ${m.toString(8)})`);
   }
   const listing = await run("tar", ["-tvzf", join(packDir, packed ?? "missing.tgz")]).then((r) => r.stdout, () => "");
-  check(/^-rwx.* package\/dist\/cli\/rex-bot\.js$/m.test(listing), "the tarball has dist/cli/rex-bot.js with its exec bit");
+  check(/^-rwx.* package\/dist\/cli\/rex-grokbot\.js$/m.test(listing), "the tarball has dist/cli/rex-grokbot.js with its exec bit");
   const inst = await run("npm", ["install", "-g", "--prefix", prefix, "--no-audit", "--no-fund", "--loglevel=error", join(packDir, packed ?? "missing.tgz")], { env: npmEnv, timeout: 180_000 }).then(
     () => true,
     (e) => (console.log(e.stderr), false),
   );
   check(inst, `npm i -g --prefix <sandbox> ${packed}`);
-  const bin = join(prefix, "bin/rex-bot");
+  const bin = join(prefix, "bin/rex-grokbot");
   const ver = await run(bin, ["--version"]).then((r) => r.stdout.trim(), (e) => `error: ${e.message}`);
-  check(ver === pkgVersion, `<prefix>/bin/rex-bot --version prints ${ver} (package.json ${pkgVersion})`);
+  check(ver === pkgVersion, `<prefix>/bin/rex-grokbot --version prints ${ver} (package.json ${pkgVersion})`);
+  const binHelp = await run(bin, ["--help"]).then((r) => r.stdout, () => "");
+  check(/^usage: rex-grokbot /.test(binHelp) && /^ {2}token /m.test(binHelp) && /^ {2}url /m.test(binHelp), "<prefix>/bin/rex-grokbot --help lists token and url");
+  check(!(await stat(join(prefix, "bin/rex-bot")).catch(() => null)) && !(await stat(join(prefix, "bin/rex-bot-bridge")).catch(() => null)), "no rex-bot / rex-bot-bridge bins installed");
+  const tokHome = await mkdtemp(join(SB, "tokhome-"));
+  const noTok = await run(bin, ["token"], { env: { ...env, HOME: tokHome, XDG_CONFIG_HOME: join(tokHome, ".config") } }).then((r) => ({ code: 0, ...r }), (e) => e);
+  check(noTok.code === 1 && /no token yet; run rex-grokbot setup/.test(noTok.stderr), "<prefix>/bin/rex-grokbot token (sandbox HOME, no token) exits 1 with the setup hint");
+  await mkdir(join(tokHome, ".config/rex-bot-bridge"), { recursive: true, mode: 0o700 });
+  await writeFile(join(tokHome, ".config/rex-bot-bridge/token"), "fake-e2e-token-not-a-secret\n", { mode: 0o600 });
+  const binTok = await run(bin, ["token"], { env: { ...env, HOME: tokHome, XDG_CONFIG_HOME: join(tokHome, ".config") } }).then((r) => r.stdout, () => "");
+  check(binTok === "fake-e2e-token-not-a-secret\n", "<prefix>/bin/rex-grokbot token (sandbox HOME) prints exactly the token line");
 }
 
 sink.close();

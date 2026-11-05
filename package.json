@@ -1,6 +1,6 @@
 {
   "name": "rex-bot-bridge",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Let a coordinator bot (Grok Bot over Tailscale) see and drive the coding agents running in your Rex terminals. One-command macOS installer.",
   "keywords": [
     "rex",
@@ -29,8 +29,7 @@
     "darwin"
   ],
   "bin": {
-    "rex-bot": "dist/cli/rex-bot.js",
-    "rex-bot-bridge": "dist/cli/bridge.js"
+    "rex-grokbot": "dist/cli/rex-grokbot.js"
   },
   "files": [
     "dist",
@@ -42,12 +41,12 @@
     "CHANGELOG.md"
   ],
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.build.json && chmod +x dist/cli/rex-bot.js dist/cli/bridge.js",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && chmod +x dist/cli/rex-grokbot.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test 'test/**/*.test.ts'",
     "prepare": "npm run build",
-    "start": "node dist/cli/rex-bot.js serve",
-    "dev": "tsx src/cli/rex-bot.ts serve",
+    "start": "node dist/cli/rex-grokbot.js serve",
+    "dev": "tsx src/cli/rex-grokbot.ts serve",
     "e2e": "node scripts/e2e.mjs",
     "e2e:paste": "node scripts/e2e-paste.mjs",
     "e2e:sandbox": "node scripts/e2e-sandbox.mjs",

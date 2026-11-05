@@ -1,5 +1,5 @@
 -- rex-bot-actions.lua: command palette actions for rex-bot-bridge.
--- Loaded from init.lua by the block `rex-bot setup` adds (between the `rex-bot-bridge` markers).
+-- Loaded from init.lua by the block `rex-grokbot setup` adds (between the `rex-bot-bridge` markers).
 -- Edits the same opt-in list the watcher and the bridge read: ~/.config/rex-bot-bridge/watched.
 
 local BOT_DIR = (os.getenv("HOME") or "") .. "/.config/rex-bot-bridge"
@@ -32,7 +32,7 @@ end
 local function bot_write_lines(lines)
   local tmp = BOT_WATCHED .. ".tmp"
   local f = io.open(tmp, "w")
-  if not f then error("cannot write " .. BOT_WATCHED .. " (run `rex-bot setup` first)", 0) end
+  if not f then error("cannot write " .. BOT_WATCHED .. " (run `rex-grokbot setup` first)", 0) end
   local ok, r = pcall(rex.exec, { "/bin/chmod", "600", tmp })
   if not ok or not r or r.code ~= 0 then
     f:close(); os.remove(tmp)
@@ -77,7 +77,7 @@ rex.action{
   title = "Bot: Watch / Unwatch This Session",
   description = "Let the coordinator bot see and drive this session (status pushes + watched-mode access), or stop.",
   category = "Bot",
-  keywords = "grok bot coordinator webhook watch notify rex-bot",
+  keywords = "grok bot coordinator webhook watch notify rex-grokbot",
   run = function(ctx, args)
     local sid = ctx.session_id
     if not sid then error("no session", 0) end
@@ -101,7 +101,7 @@ rex.action{
   name = "bot_watch_list",
   title = "Bot: List Watched Sessions",
   category = "Bot",
-  keywords = "grok bot coordinator webhook watch rex-bot",
+  keywords = "grok bot coordinator webhook watch rex-grokbot",
   run = function(ctx, args)
     local ids = bot_read_ids()
     local labels = bot_session_labels()

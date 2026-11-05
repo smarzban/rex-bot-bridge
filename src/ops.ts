@@ -52,7 +52,7 @@ export interface OpsDeps {
 }
 
 export const OPT_IN_HINT =
-  'Ask the human to opt it in (Rex command palette "Bot: Watch / Unwatch This Session", or `rex-bot watch add <session_id>`)';
+  'Ask the human to opt it in (Rex command palette "Bot: Watch / Unwatch This Session", or `rex-grokbot watch add <session_id>`)';
 
 /** Runs fn over items with at most `limit` in flight. */
 async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> {
@@ -107,7 +107,7 @@ export class Ops {
     if ((await this.watch.list()).includes(sessionId)) return;
     throw new BridgeError(
       `${tool} refused: the bridge is in "watched" mode and session ${sessionId} is not watched. ${OPT_IN_HINT}. ` +
-        "The Mac's owner can allow every session with `rex-bot config set mode full`.",
+        "The Mac's owner can allow every session with `rex-grokbot config set mode full`.",
     );
   }
 

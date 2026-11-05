@@ -1,4 +1,4 @@
-// `rex-bot setup webhook`: where the watcher and `rex-bot say` POST to (a Grok Bot routine's webhook).
+// `rex-grokbot setup webhook`: where the watcher and `rex-grokbot say` POST to (a Grok Bot routine's webhook).
 import type { Ctx } from "./context.js";
 import { DOC_URL } from "./grokbot.js";
 import { describe, enrich, postWebhook, type PostResult } from "./notify.js";
@@ -100,12 +100,12 @@ export const KEEP = " (set; Enter keeps it)";
 /** What to do about a failed test post. Never includes the URL or key. */
 export function webhookHint(r: PostResult): string {
   if (r.status === 401 || r.status === 403)
-    return "The routine refused the key. Copy the key again from the routine's Webhook trigger, check which header it goes in (Authorization or e.g. X-Webhook-Key), then: rex-bot setup webhook";
-  if (r.status === 404) return "Nothing at that URL (wrong URL, or the routine was deleted). Copy the webhook URL again from the routine, then: rex-bot setup webhook";
-  if (r.reason === "timeout") return "No answer within 5s. Check this Mac's network and the routine, then: rex-bot doctor --test-webhook";
-  if (r.status === 0) return `Could not connect (${r.reason ?? "failed"}). Check the URL's host, then: rex-bot setup webhook`;
-  if (r.status >= 500) return "The routine's host had an error. Try again later: rex-bot doctor --test-webhook";
-  return "Check the routine's webhook URL and key: rex-bot setup webhook";
+    return "The routine refused the key. Copy the key again from the routine's Webhook trigger, check which header it goes in (Authorization or e.g. X-Webhook-Key), then: rex-grokbot setup webhook";
+  if (r.status === 404) return "Nothing at that URL (wrong URL, or the routine was deleted). Copy the webhook URL again from the routine, then: rex-grokbot setup webhook";
+  if (r.reason === "timeout") return "No answer within 5s. Check this Mac's network and the routine, then: rex-grokbot doctor --test-webhook";
+  if (r.status === 0) return `Could not connect (${r.reason ?? "failed"}). Check the URL's host, then: rex-grokbot setup webhook`;
+  if (r.status >= 500) return "The routine's host had an error. Try again later: rex-grokbot doctor --test-webhook";
+  return "Check the routine's webhook URL and key: rex-grokbot setup webhook";
 }
 
 /** POSTs a doctor_test event (the routine instructions answer it with "rex-bot-bridge webhook OK"). */
@@ -123,7 +123,7 @@ export async function setupWebhook(ctx: Ctx, flags: WebhookFlags, p: Prompter, o
   const ok = (s: string) => ctx.out(`✅ ${s}`);
   const warn = (s: string) => ctx.out(`⚠️  ${s}`);
   const usage = (s: string) => {
-    ctx.err(`rex-bot setup webhook: ${s}\nRun \`rex-bot setup webhook --help\` for usage.`);
+    ctx.err(`rex-grokbot setup webhook: ${s}\nRun \`rex-grokbot setup webhook --help\` for usage.`);
     return 2;
   };
 
@@ -141,8 +141,8 @@ export async function setupWebhook(ctx: Ctx, flags: WebhookFlags, p: Prompter, o
   if (flags.header !== undefined && !HEADER_NAME.test(flags.header)) return usage("--header must be a header name, e.g. X-Webhook-Key");
   if (!p.interactive && flags.url === undefined && !cur.url) return usage("no webhook URL saved yet; pass --url URL");
 
-  say("rex-bot setup webhook\n");
-  say("The watcher and `rex-bot say` POST to your Grok Bot routine's webhook. Its URL (and key, if it");
+  say("rex-grokbot setup webhook\n");
+  say("The watcher and `rex-grokbot say` POST to your Grok Bot routine's webhook. Its URL (and key, if it");
   say(`shows one) are on the routine's Webhook trigger. Guide: ${DOC_URL}\n`);
 
   // URL
@@ -161,7 +161,7 @@ export async function setupWebhook(ctx: Ctx, flags: WebhookFlags, p: Prompter, o
     if (a) url = a;
   }
   if (!url) {
-    say("No URL given; nothing saved. Run `rex-bot setup webhook` again when you have the routine's webhook URL.");
+    say("No URL given; nothing saved. Run `rex-grokbot setup webhook` again when you have the routine's webhook URL.");
     return 0;
   }
 
@@ -233,13 +233,13 @@ export async function setupWebhook(ctx: Ctx, flags: WebhookFlags, p: Prompter, o
   ok(`Webhook saved to ${ctx.paths.configFile}: URL (set), ${how}`);
 
   if (!flags.test || !(await p.confirm(TEST_QUESTION, true))) {
-    say("\nTest it any time: rex-bot doctor --test-webhook");
+    say("\nTest it any time: rex-grokbot doctor --test-webhook");
     return 0;
   }
   const r = await testWebhook(ctx, s, opts.timeoutMs);
   if (r.ok) {
     ok(`Test sent: ${describe(r)}. Your routine should run and reply "rex-bot-bridge webhook OK".`);
-    say("\nNext: rex-bot doctor --test-webhook");
+    say("\nNext: rex-grokbot doctor --test-webhook");
     return 0;
   }
   ctx.err(`❌ Test failed: ${describe(r)}\n   fix: ${webhookHint(r)}`);

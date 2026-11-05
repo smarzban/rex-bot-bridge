@@ -10,7 +10,7 @@ import { childEnv, tempDir } from "./helpers.js";
 const ROOT = join(import.meta.dirname, "..");
 const home = await tempDir();
 const cli = (args: string[]) =>
-  spawnSync(process.execPath, ["--import", "tsx", join(ROOT, "src/cli/rex-bot.ts"), ...args], {
+  spawnSync(process.execPath, ["--import", "tsx", join(ROOT, "src/cli/rex-grokbot.ts"), ...args], {
     cwd: ROOT,
     env: childEnv({ HOME: home }),
     encoding: "utf8",
@@ -19,7 +19,7 @@ const cli = (args: string[]) =>
 test("T429 help: top-level help is grouped, names every command, and points at per-command help", () => {
   for (const g of ["Setup", "Check", "Settings", "Watch list", "For agents", "Services"]) assert.match(TOP_HELP, new RegExp(`^${g}$`, "m"));
   for (const c of Object.keys(HELP)) assert.match(TOP_HELP, new RegExp(`^  ${c} `, "m"), c);
-  assert.match(TOP_HELP, /Run `rex-bot help <command>` or `rex-bot <command> --help`/);
+  assert.match(TOP_HELP, /Run `rex-grokbot help <command>` or `rex-grokbot <command> --help`/);
   assert.match(TOP_HELP, /docs\/grok-bot\.md/);
 });
 
@@ -34,8 +34,8 @@ test("T429 help: --help, -h and help all print the top-level help, exit 0", () =
 test("T429 help: every command's page has usage, Examples and Exit, via help <cmd>, <cmd> --help and <cmd> -h", () => {
   for (const name of Object.keys(HELP)) {
     const page = commandHelp(name)!;
-    assert.match(page, /^usage: rex-bot /, name);
-    assert.match(page, /\nExamples:\n {2}rex-bot /, name);
+    assert.match(page, /^usage: rex-grokbot /, name);
+    assert.match(page, /\nExamples:\n {2}rex-grokbot /, name);
     assert.match(page, /\nExit:\n {2}\S/, name);
     const words = name.split(" ");
     for (const args of [["help", ...words], [...words, "--help"], [...words, "-h"]]) {
@@ -56,12 +56,12 @@ test("T429 help: setup parts share setup's page; setup webhook has its own", () 
 test("T429 help: unknown command / flag → one short error with a --help hint, exit 2", () => {
   const u = cli(["frobnicate"]);
   assert.equal(u.status, 2);
-  assert.equal(u.stderr, "rex-bot: unknown command: frobnicate\nRun `rex-bot --help` for usage.\n");
+  assert.equal(u.stderr, "rex-grokbot: unknown command: frobnicate\nRun `rex-grokbot --help` for usage.\n");
   const f = cli(["doctor", "--nope"]);
   assert.equal(f.status, 2);
-  assert.match(f.stderr, /^rex-bot: Unknown option '--nope'.*\nRun `rex-bot doctor --help` for usage\.\n$/);
+  assert.match(f.stderr, /^rex-grokbot: Unknown option '--nope'.*\nRun `rex-grokbot doctor --help` for usage\.\n$/);
   assert.equal(cli(["help", "frobnicate"]).status, 2);
-  assert.equal(cli([]).status, 2, "bare rex-bot: help on stderr, exit 2");
+  assert.equal(cli([]).status, 2, "bare rex-grokbot: help on stderr, exit 2");
 });
 
 test("T429 help: README's command table is generated from the help text", async () => {

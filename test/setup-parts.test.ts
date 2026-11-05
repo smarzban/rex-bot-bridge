@@ -1,4 +1,4 @@
-// T429: `rex-bot setup <part>` runs only that part; launchd bootout→bootstrap race; numbered sections;
+// T429: `rex-grokbot setup <part>` runs only that part; launchd bootout→bootstrap race; numbered sections;
 // `uninstall --purge` keeps the init.lua backups.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -42,7 +42,7 @@ async function partRun(part: Part) {
   for (const r of f.ctx.paths.skillRoots) await mkdir(r, { recursive: true });
   const code = await setup(f.ctx, { ...ALL }, makePrompter(true), part);
   const init = await readFile(f.ctx.paths.rexInitLua, "utf8");
-  const skill = existsSync(`${f.ctx.paths.skillRoots[0]}/skills/rex-bot/SKILL.md`);
+  const skill = existsSync(`${f.ctx.paths.skillRoots[0]}/skills/rex-grokbot/SKILL.md`);
   const serveRuns = f.tsCalls.filter((a) => a[0] === "serve" && a.includes("--set-path")).length;
   const bootstraps = calls.filter((c) => c[0] === "bootstrap").length;
   return { code, out: f.out.join("\n"), init, skill, serveRuns, bootstraps, f };
@@ -104,10 +104,10 @@ test("T429 setup: numbered sections in order, then exactly the Next block", asyn
     `Next
   1. Set up Grok Bot: https://github.com/smarzban/rex-bot-bridge/blob/main/docs/grok-bot.md
      (or give your Grok Bot this address: https://raw.githubusercontent.com/smarzban/rex-bot-bridge/main/docs/grok-bot.md)
-  2. Add the routine's webhook: rex-bot setup webhook
-  3. Check everything: rex-bot doctor --test-webhook`,
+  2. Add the routine's webhook: rex-grokbot setup webhook
+  3. Check everything: rex-grokbot doctor --test-webhook`,
   );
-  assert.match(out, /⚠️ {2}Skipped \(--no-rex-config\)\.\n {6}fix: rex-bot setup rex/);
+  assert.match(out, /⚠️ {2}Skipped \(--no-rex-config\)\.\n {6}fix: rex-grokbot setup rex/);
 });
 
 // ---------- launchd race ----------
@@ -185,9 +185,9 @@ test("T429 doctor: fix lines are exact commands (not loaded → launchctl bootst
   const checks = await runDoctor(f.ctx, { testWebhook: false });
   const fix = (id: string) => checks.find((c) => c.id === id)?.fix;
   assert.match(fix("service_bridge")!, new RegExp(`^launchctl bootstrap gui/\\$\\(id -u\\) '.*${LABELS.bridge}\\.plist'$`));
-  assert.equal(fix("service_watch"), "rex-bot setup services", "no plist yet → setup services");
-  assert.equal(fix("webhook"), "rex-bot setup webhook");
-  assert.equal(fix("rex_actions"), "rex-bot setup rex");
+  assert.equal(fix("service_watch"), "rex-grokbot setup services", "no plist yet → setup services");
+  assert.equal(fix("webhook"), "rex-grokbot setup webhook");
+  assert.equal(fix("rex_actions"), "rex-grokbot setup rex");
 });
 
 // ---------- uninstall --purge keeps init.lua backups ----------

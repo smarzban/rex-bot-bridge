@@ -70,7 +70,7 @@ export async function uninstall(ctx: Ctx, flags: UninstallFlags, p: Prompter): P
     const kept = (await readdir(paths.backupsDir).catch(() => [])).length;
     ok(`Deleted ${paths.stateDir} (token, config, watched list).${kept ? ` init.lua backups kept in ${paths.backupsDir}` : ""}`);
   } else {
-    ctx.out(`   Kept ${paths.stateDir} (token, config, watched list). Delete it with: rex-bot uninstall --purge`);
+    ctx.out(`   Kept ${paths.stateDir} (token, config, watched list). Delete it with: rex-grokbot uninstall --purge`);
   }
   ctx.out("   To remove the package itself: npm uninstall -g rex-bot-bridge");
   return failed ? 1 : 0;

@@ -31,7 +31,7 @@ case "$1" in
     case " $* " in
       *" -g "*)
         mkdir -p "$STUB_PREFIX/bin"
-        printf '#!/bin/sh\\necho 0.3.0\\n' > "$STUB_PREFIX/bin/rex-bot"; chmod +x "$STUB_PREFIX/bin/rex-bot" ;;
+        printf '#!/bin/sh\\necho 0.3.0\\n' > "$STUB_PREFIX/bin/rex-grokbot"; chmod +x "$STUB_PREFIX/bin/rex-grokbot" ;;
     esac ;;
 esac`,
 };
@@ -126,9 +126,9 @@ test("FR1-B install.sh: REX_BOT_SOURCE=npm + REX_BOT_VERSION → npm i -g rex-bo
   const calls = await sb.calls();
   assert.ok(globalInstall(calls).some((c) => c.endsWith(" rex-bot-bridge@0.3.0")), calls.join("\n"));
   assert.ok(!calls.some((c) => c.startsWith("curl")));
-  assert.match(r.out, /✅ Installed rex-bot 0\.3\.0/);
-  assert.match(r.stdout, /\nNext: rex-bot setup\n$/);
-  assert.ok(!r.out.includes("Run rex-bot setup now?"), "no question without a terminal");
+  assert.match(r.out, /✅ Installed rex-grokbot 0\.3\.0/);
+  assert.match(r.stdout, /\nNext: rex-grokbot setup\n$/);
+  assert.ok(!r.out.includes("Run rex-grokbot setup now?"), "no question without a terminal");
 });
 
 test("FR1-B install.sh: REX_BOT_SOURCE=github + ref → codeload URL for that ref, then npm i -g of the built tarball", async () => {
@@ -162,7 +162,7 @@ test("FR1-F install.sh: npm's redacted prefix (***) resolves from NPM_CONFIG_PRE
   const real = join(sb.dir, UUID, "pfx");
   const r = sb.run({ STUB_PREFIX: real, STUB_PREFIX_SHOWN: join(sb.dir, "***", "pfx"), NPM_CONFIG_PREFIX: real, REX_BOT_SOURCE: "npm" });
   assert.equal(r.status, 0, r.out);
-  assert.match(r.out, new RegExp(`✅ Installed rex-bot 0\\.3\\.0 \\(${real.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/bin/rex-bot\\)`));
+  assert.match(r.out, new RegExp(`✅ Installed rex-grokbot 0\\.3\\.0 \\(${real.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/bin/rex-grokbot\\)`));
   assert.ok(!r.out.includes("doesn't run"));
 });
 
@@ -172,7 +172,7 @@ test("FR1-F install.sh: redacted prefix resolves from where npm lives when no en
   const shown = sb.prefix.replace(/prefix$/, "***");
   const r = sb.run({ STUB_PREFIX_SHOWN: shown, REX_BOT_SOURCE: "npm" });
   assert.equal(r.status, 0, r.out);
-  assert.match(r.out, /✅ Installed rex-bot 0\.3\.0/);
+  assert.match(r.out, /✅ Installed rex-grokbot 0\.3\.0/);
 });
 
 test("FR1-F install.sh: an unresolvable redacted prefix says so and installs nothing", async () => {

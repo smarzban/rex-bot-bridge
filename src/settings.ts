@@ -26,7 +26,7 @@ export const DEFAULTS: Settings = {
   webhook: {},
 };
 
-/** Keys `rex-bot config get|set` accepts. Secrets are hidden by `get` unless --show. */
+/** Keys `rex-grokbot config get|set` accepts. Secrets are hidden by `get` unless --show. */
 export const KEYS = ["mode", "port", "host", "servePath", "webhook.url", "webhook.key", "webhook.header"] as const;
 export type Key = (typeof KEYS)[number];
 export const SECRET_KEYS: readonly Key[] = ["webhook.url", "webhook.key"];
