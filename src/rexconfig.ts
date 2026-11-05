@@ -88,9 +88,16 @@ export type RexConfigResult =
 async function backup(opts: RexConfigOptions, content: Buffer): Promise<string> {
   await mkdir(opts.backupsDir, { recursive: true, mode: 0o700 });
   const stamp = (opts.now?.() ?? new Date()).toISOString().replace(/[:.]/g, "-");
-  const path = join(opts.backupsDir, `${basename(opts.initPath)}.${stamp}`);
-  await writeFile(path, content, { mode: 0o600 });
-  return path;
+  // Never overwrite an earlier backup (two runs in the same millisecond get -1, -2, …).
+  for (let i = 0; ; i++) {
+    const path = join(opts.backupsDir, `${basename(opts.initPath)}.${stamp}${i ? `-${i}` : ""}`);
+    try {
+      await writeFile(path, content, { mode: 0o600, flag: "wx" });
+      return path;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST" || i >= 100) throw e;
+    }
+  }
 }
 
 /** `rex config check <path>`; returns null when it passes, else the complaint text. */

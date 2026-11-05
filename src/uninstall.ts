@@ -64,7 +64,7 @@ export async function uninstall(ctx: Ctx, flags: UninstallFlags, p: Prompter): P
 
   if (flags.purge) {
     await rm(paths.stateDir, { recursive: true, force: true });
-    ok(`Deleted ${paths.stateDir} (token, config, watched list, init.lua backups)`);
+    ok(`Deleted ${paths.stateDir} (token, config, watched list). init.lua backups kept in ${paths.backupsDir}`);
   } else {
     ctx.out(`   Kept ${paths.stateDir} (token, config, watched list). Delete it with: rex-bot uninstall --purge`);
   }

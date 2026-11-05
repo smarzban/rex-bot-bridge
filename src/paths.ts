@@ -38,7 +38,8 @@ export function resolvePaths(env: NodeJS.ProcessEnv = process.env): Paths {
     configFile: join(stateDir, "config.json"),
     watchedFile: join(stateDir, "watched"),
     heartbeatFile: join(stateDir, "heartbeat"),
-    backupsDir: join(stateDir, "init-backups"),
+    // Next to init.lua, not in stateDir: `uninstall --purge` deletes stateDir and must keep these.
+    backupsDir: join(dirname(env.REX_CONFIG || join(xdg, "rex/init.lua")), "rex-bot-backups"),
     logsDir,
     notifyLog: join(logsDir, "notify.log"),
     auditLog: env.REX_BRIDGE_AUDIT_LOG || join(home, ".local/state/rex-bot-bridge/audit.log"),
