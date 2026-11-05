@@ -52,12 +52,9 @@ function serveStatus(on443: Record<string, unknown> | null, on8443: Record<strin
   }
   return ok(JSON.stringify({ TCP, Web }));
 }
-/** What this Mac looked like on 2026-11-05: T3 Code owns `/` on :443, our legacy path beside it. */
-const LEGACY_LIVE = serveStatus({ "/": T3, "/rex-bridge": OURS }, null);
 
 const MAP = ["serve", "--bg", "--https=8443", "http://127.0.0.1:7400"];
 const PORT_OFF = ["serve", "--https=8443", "off"];
-const LEGACY_OFF = ["serve", "--https=443", "--set-path", "/rex-bridge", "off"];
 const changes = (calls: string[][]) => calls.filter((a) => a[0] === "serve" && a[1] !== "status");
 
 /**
@@ -150,88 +147,31 @@ for (const [name, st] of [
   });
 }
 
-// ---------- migration from the ≤ 0.4 /rex-bridge path on :443 ----------
+// ---------- settings ----------
 
-test("T431 migration: once the new origin answers, setup removes only our /rex-bridge path on :443", async () => {
-  const f = await fakeCtx(LEGACY_LIVE);
-  f.ctx.fetch = bridgeFetch();
-  assert.equal(await setup(f.ctx, { ...FLAGS, yes: true }, makePrompter(true), "serve"), 0);
-  assert.deepEqual(changes(f.tsCalls), [MAP, LEGACY_OFF]);
-  // Never `/` on 443, never a whole-port off of 443.
-  assert.ok(!changes(f.tsCalls).some((a) => a.includes("--https=443") && !a.includes("--set-path")));
-  const out = f.out.join("\n");
-  assert.match(out, /old mapping https:\/\/mac\.tail\.ts\.net\/rex-bridge → http:\/\/127\.0\.0\.1:7400 \(0\.4 and earlier\)/);
-  assert.match(out, /✅ Removed the old mapping https:\/\/mac\.tail\.ts\.net\/rex-bridge/);
-  assert.match(out, /connector URL changed: set the rex connector in Grok Bot to https:\/\/mac\.tail\.ts\.net:8443\/mcp/);
-});
-
-test("T431 migration: interactive asks with default yes; a no keeps it and prints the off command", async () => {
-  const f = await fakeCtx(serveStatus({ "/": T3, "/rex-bridge": OURS }, { "/": OURS }));
-  f.ctx.fetch = bridgeFetch();
-  const p = scriptedPrompter({ "Remove the old": false });
-  await setup(f.ctx, FLAGS, p, "serve");
-  const q = p.asked.find((a) => a.q.includes("Remove the old /rex-bridge mapping on port 443"));
-  assert.ok(q, JSON.stringify(p.asked));
-  assert.deepEqual(changes(f.tsCalls), []);
-  assert.match(f.out.join("\n"), /Old mapping left in place\.\n {6}fix: tailscale serve --https=443 --set-path \/rex-bridge off/);
-
-  const d = await fakeCtx(serveStatus({ "/": T3, "/rex-bridge": OURS }, { "/": OURS }));
-  d.ctx.fetch = bridgeFetch();
-  const dp = scriptedPrompter();
-  await setup(d.ctx, FLAGS, dp, "serve");
-  assert.equal(dp.asked.find((a) => a.q.includes("Remove the old"))?.def, true);
-  assert.deepEqual(changes(d.tsCalls), [LEGACY_OFF], "the default answer removes it");
-});
-
-test("T431 migration: the new origin not answering → legacy path kept, fix line printed", async () => {
-  const f = await fakeCtx(LEGACY_LIVE); // fakeCtx's fetch throws: no network
-  await setup(f.ctx, { ...FLAGS, yes: true }, makePrompter(true), "serve");
-  assert.deepEqual(changes(f.tsCalls), [MAP]);
-  assert.match(f.out.join("\n"), /Kept it for now: https:\/\/mac\.tail\.ts\.net:8443\/healthz didn't answer[\s\S]*tailscale serve --https=443 --set-path \/rex-bridge off/);
-});
-
-test("T431 migration: a foreign /rex-bridge on :443, or none, is never touched or mentioned", async () => {
-  for (const st of [serveStatus({ "/": T3, "/rex-bridge": { Proxy: "http://127.0.0.1:9999" } }, null), serveStatus({ "/": T3 }, null)]) {
-    const f = await fakeCtx(st);
-    f.ctx.fetch = bridgeFetch();
-    await setup(f.ctx, { ...FLAGS, yes: true }, makePrompter(true), "serve");
-    assert.deepEqual(changes(f.tsCalls), [MAP]);
-    assert.ok(!/old mapping/i.test(f.out.join("\n")));
-  }
-});
-
-test("T431 migration: a custom legacy servePath from an old config.json is the one removed", async () => {
-  const f = await fakeCtx(serveStatus({ "/": T3, "/bridge": OURS }, null));
-  f.ctx.fetch = bridgeFetch();
-  await writeRawConfig(f.ctx.paths.configFile, { mode: "watched", port: 7400, servePath: "/bridge" });
-  await setup(f.ctx, { ...FLAGS, yes: true }, makePrompter(true), "serve");
-  assert.deepEqual(changes(f.tsCalls), [MAP, ["serve", "--https=443", "--set-path", "/bridge", "off"]]);
-});
-
-test("T431 settings: an old config.json keeps servePath for migration; a bad servePort falls back to 8443", async () => {
+test("T431 settings: a bad servePort in config.json falls back to 8443", async () => {
   const f = await fakeCtx(ok("{}"));
-  await writeRawConfig(f.ctx.paths.configFile, { mode: "full", servePath: "/rex-bridge", servePort: 443 });
+  await writeRawConfig(f.ctx.paths.configFile, { mode: "full", servePort: 443 });
   const s = await readSettings(f.ctx.paths.configFile);
-  assert.deepEqual([s.servePath, s.servePort, s.mode], ["/rex-bridge", 8443, "full"]);
+  assert.deepEqual([s.servePort, s.mode], [8443, "full"]);
 });
 
 // ---------- uninstall ----------
 
-test("T431 uninstall --serve-off: removes our port mapping and our legacy path; never / or foreign", async () => {
+test("T431 uninstall --serve-off: removes our port mapping; never a foreign one or anything on 443", async () => {
   const run = async (st: RunResult, flags = { yes: true, serveOff: true }, p = makePrompter(true)) => {
     const f = await fakeCtx(st);
     await uninstall(f.ctx, { ...flags, purge: false }, p);
     return { calls: changes(f.tsCalls), out: f.out.join("\n") };
   };
-  assert.deepEqual((await run(serveStatus({ "/": T3, "/rex-bridge": OURS }, { "/": OURS }))).calls, [PORT_OFF, LEGACY_OFF]);
+  assert.deepEqual((await run(serveStatus({ "/": T3, "/rex-bridge": OURS }, { "/": OURS }))).calls, [PORT_OFF], "a /rex-bridge path on 443 is not ours to remove");
   assert.deepEqual((await run(serveStatus({ "/": T3, "/rex-bridge": { Proxy: "http://127.0.0.1:9999" } }, { "/": OURS }))).calls, [PORT_OFF]);
-  assert.deepEqual((await run(serveStatus({ "/": T3 }, { "/": T3 }))).calls, [], "foreign port and no legacy");
+  assert.deepEqual((await run(serveStatus({ "/": T3 }, { "/": T3 }))).calls, [], "foreign port");
   assert.deepEqual((await run(serveStatus({ "/": OURS }, null))).calls, [], "`/` on 443 is never ours to remove");
 
   const kept = await run(serveStatus({ "/rex-bridge": OURS }, { "/": OURS }), { yes: true, serveOff: false });
   assert.deepEqual(kept.calls, [], "--yes without --serve-off");
   assert.match(kept.out, /Tailscale Serve port 8443 left in place\. Remove it with: tailscale serve --https=8443 off/);
-  assert.match(kept.out, /\/rex-bridge on port 443 \(0\.4 and earlier\) left in place\. Remove it with: tailscale serve --https=443 --set-path \/rex-bridge off/);
 
   const asked = await run(serveStatus(null, { "/": OURS }), { yes: false, serveOff: false }, scriptedPrompter({ "Remove the Tailscale Serve mapping port 8443": true }));
   assert.deepEqual(asked.calls, [PORT_OFF]);
@@ -248,7 +188,7 @@ test("T431 url: https://<mac>:<servePort>/mcp", async () => {
   assert.equal(await urlCommand(f.ctx), 0);
   assert.deepEqual([out, err], [["https://mac.tail.ts.net:8443/mcp"], []]);
 
-  const g = await fakeCtx(serveStatus({ "/rex-bridge": OURS }, null)); // only the legacy mapping
+  const g = await fakeCtx(serveStatus({ "/rex-bridge": OURS }, null)); // nothing on our port
   const gout: string[] = [];
   const gerr: string[] = [];
   g.ctx.out = (s) => gout.push(s);
@@ -296,24 +236,12 @@ test("T431 doctor: port mapping, tailnet healthz and no OAuth metadata on our or
   assert.equal(c("bridge_tailnet")?.level, "ok");
   assert.equal(c("oauth_discovery")?.level, "ok");
   assert.match(c("oauth_discovery")!.detail, /oauth-authorization-server → 404/);
-  assert.equal(c("serve_legacy"), undefined, "no legacy mapping, no warning");
 });
 
 test("T431 doctor: OAuth metadata answering on our origin is a failure", async () => {
   const c = await check(serveStatus(null, { "/": OURS }), bridgeFetch(undefined, 200));
   assert.equal(c("oauth_discovery")?.level, "fail");
   assert.match(c("oauth_discovery")!.detail, /answered HTTP 200 \(expected 404\)/);
-});
-
-test("T431 doctor: our leftover /rex-bridge on :443 is ⚠️ with the exact off command; a foreign one is ignored", async () => {
-  const c = await check(LEGACY_LIVE);
-  assert.equal(c("serve_legacy")?.level, "warn");
-  assert.equal(c("serve_legacy")?.fix, "tailscale serve --https=443 --set-path /rex-bridge off");
-  assert.equal(c("serve")?.level, "fail", "the port isn't mapped yet");
-  assert.equal(c("serve")?.fix, "tailscale serve --bg --https=8443 http://127.0.0.1:7400");
-
-  const d = await check(serveStatus({ "/": T3, "/rex-bridge": { Proxy: "http://127.0.0.1:9999" } }, { "/": OURS }));
-  assert.equal(d("serve_legacy"), undefined);
 });
 
 test("T431 doctor: another app on our port → fail, fix is to pick another servePort", async () => {

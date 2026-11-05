@@ -1,8 +1,8 @@
--- rex-bot-actions.lua: command palette actions for rex-bot-bridge.
--- Loaded from init.lua by the block `rex-grokbot setup` adds (between the `rex-bot-bridge` markers).
--- Edits the same opt-in list the watcher and the bridge read: ~/.config/rex-bot-bridge/watched.
+-- rex-grokbot-actions.lua: command palette actions for rex-grokbot-bridge.
+-- Loaded from init.lua by the block `rex-grokbot setup` adds (between the `rex-grokbot-bridge` markers).
+-- Edits the same opt-in list the watcher and the bridge read: ~/.config/rex-grokbot-bridge/watched.
 
-local BOT_DIR = (os.getenv("HOME") or "") .. "/.config/rex-bot-bridge"
+local BOT_DIR = (os.getenv("HOME") or "") .. "/.config/rex-grokbot-bridge"
 local BOT_WATCHED = BOT_DIR .. "/watched"
 
 local function bot_read_lines()

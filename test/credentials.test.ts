@@ -1,5 +1,4 @@
-// T430: `rex-grokbot token` / `token --rotate` / `url` (fake launchctl and tailscale), the old rex-bot skill
-// cleanup, and setup no longer warning about the webhook.
+// T430: `rex-grokbot token` / `token --rotate` / `url` (fake launchctl and tailscale), and setup no longer warning about the webhook.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
@@ -53,8 +52,8 @@ test("token --rotate: new token in the file and on stdout; bridge loaded → kic
   const kick = f.launchctlCalls.find((a) => a[0] === "kickstart");
   assert.ok(kick, "kickstarted the bridge");
   assert.equal(kick[1], "-k");
-  assert.match(kick[2]!, /^gui\/\d+\/com\.rexbotbridge\.bridge$/);
-  assert.match(stderr.join("\n"), /restarted com\.rexbotbridge\.bridge/);
+  assert.match(kick[2]!, /^gui\/\d+\/com\.rexgrokbotbridge\.bridge$/);
+  assert.match(stderr.join("\n"), /restarted com\.rexgrokbotbridge\.bridge/);
   assert.match(stderr.join("\n"), /update the Authorization header of the rex connector in Grok Bot/);
   assert.ok(!stderr.join("\n").includes(now));
 });
@@ -76,7 +75,7 @@ test("token --rotate: kickstart fails → launchctl's error + fix line on stderr
   assert.notEqual(now, FAKE);
   assert.deepEqual(stdout, [now]);
   const err = stderr.join("\n");
-  assert.match(err, /restarting com\.rexbotbridge\.bridge failed: Could not kickstart service: Operation not permitted\n {2}fix: rex-grokbot setup services/);
+  assert.match(err, /restarting com\.rexgrokbotbridge\.bridge failed: Could not kickstart service: Operation not permitted\n {2}fix: rex-grokbot setup services/);
   assert.match(err, /update the Authorization header of the rex connector/);
   assert.ok(!err.includes(now));
 });
@@ -124,35 +123,6 @@ test("url: prints only https://<dns>:8443/mcp; warns on stderr when Serve isn't 
   h.ctx.tailscale = async () => ({ stdout: "", stderr: "not running", code: 1 });
   assert.equal(await urlCommand(h.ctx), 1);
   assert.match(h.out.join("\n"), /Tailscale is not running[\s\S]*fix: start Tailscale/);
-});
-
-test("skills: the pre-0.4.0 rex-bot skill is removed only when it carries our marker", async () => {
-  const home = await tempDir();
-  const claude = join(home, ".claude");
-  const agents = join(home, ".agents");
-  const ours = "---\nname: rex-bot\nmetadata:\n  installed-by: rex-bot-bridge\n---\nold\n";
-  const theirs = "---\nname: rex-bot\n---\nsomeone else's\n";
-  await mkdir(join(claude, "skills/rex-bot"), { recursive: true });
-  await writeFile(join(claude, "skills/rex-bot/SKILL.md"), ours);
-  await mkdir(join(agents, "skills/rex-bot"), { recursive: true });
-  await writeFile(join(agents, "skills/rex-bot/SKILL.md"), theirs);
-
-  const r = await installSkills([claude, agents]);
-  assert.deepEqual(r.installed, [join(claude, "skills/rex-grokbot/SKILL.md"), join(agents, "skills/rex-grokbot/SKILL.md")]);
-  assert.deepEqual(r.legacyRemoved, [join(claude, "skills/rex-bot/SKILL.md")]);
-  await assert.rejects(stat(join(claude, "skills/rex-bot")), "our old skill dir is gone");
-  assert.equal(await readFile(join(agents, "skills/rex-bot/SKILL.md"), "utf8"), theirs, "someone else's rex-bot skill is kept");
-
-  // uninstall also cleans an old one of ours left behind.
-  await mkdir(join(claude, "skills/rex-bot"), { recursive: true });
-  await writeFile(join(claude, "skills/rex-bot/SKILL.md"), ours);
-  const removed = await uninstallSkills([claude, agents]);
-  assert.deepEqual(removed.sort(), [
-    join(agents, "skills/rex-grokbot/SKILL.md"),
-    join(claude, "skills/rex-bot/SKILL.md"),
-    join(claude, "skills/rex-grokbot/SKILL.md"),
-  ].sort());
-  assert.equal(await readFile(join(agents, "skills/rex-bot/SKILL.md"), "utf8"), theirs);
 });
 
 test("setup on a fresh install has no webhook warning; a configured one still shows ✅", async () => {

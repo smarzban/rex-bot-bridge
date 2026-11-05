@@ -51,7 +51,7 @@ async function partRun(part: Part) {
 test("T429 setup rex: only the init.lua block", async () => {
   const r = await partRun("rex");
   assert.equal(r.code, 0, r.out);
-  assert.match(r.init, /rex-bot-bridge >>>/);
+  assert.match(r.init, /rex-grokbot-bridge >>>/);
   assert.deepEqual([r.skill, r.serveRuns, r.bootstraps], [false, 0, 0]);
   assert.ok(!existsSync(r.f.ctx.paths.configFile), "no settings written");
   assert.match(r.out, /^1\. Checks$/m);
@@ -102,8 +102,8 @@ test("T429 setup: numbered sections in order, then exactly the Next block", asyn
   assert.equal(
     NEXT_BLOCK,
     `Next
-  1. Set up Grok Bot: https://github.com/smarzban/rex-bot-bridge/blob/main/docs/grok-bot.md
-     (or give your Grok Bot this address: https://raw.githubusercontent.com/smarzban/rex-bot-bridge/main/docs/grok-bot.md)
+  1. Set up Grok Bot: https://github.com/smarzban/rex-grokbot-bridge/blob/main/docs/grok-bot.md
+     (or give your Grok Bot this address: https://raw.githubusercontent.com/smarzban/rex-grokbot-bridge/main/docs/grok-bot.md)
   2. Add the routine's webhook: rex-grokbot setup webhook
   3. Check everything: rex-grokbot doctor --test-webhook`,
   );
@@ -209,34 +209,6 @@ test("T429 uninstall --purge: the init.lua backup it reports survives the purge"
   assert.match(out, /init\.lua backups kept in/);
 });
 
-test("T429 FR1-A: 0.2.x backups in the state dir are moved out and survive uninstall --purge; message is true", async () => {
-  const f = await fakeCtx(ok("{}"));
-  const { legacyBackupsDir, backupsDir, stateDir } = f.ctx.paths;
-  await mkdir(legacyBackupsDir, { recursive: true });
-  await writeFile(`${legacyBackupsDir}/init.lua.2026-11-01T00-00-00-000Z`, "-- old backup 1\n");
-  await writeFile(`${legacyBackupsDir}/init.lua.clash`, "-- old clash\n");
-  await mkdir(backupsDir, { recursive: true });
-  await writeFile(`${backupsDir}/init.lua.clash`, "-- new clash\n");
-  assert.equal(await uninstall(f.ctx, { yes: true, purge: true, serveOff: false }, makePrompter(true)), 0);
-  const out = f.out.join("\n");
-  assert.ok(!existsSync(stateDir), "state dir purged");
-  assert.equal(await readFile(`${backupsDir}/init.lua.2026-11-01T00-00-00-000Z`, "utf8"), "-- old backup 1\n");
-  assert.equal(await readFile(`${backupsDir}/init.lua.clash`, "utf8"), "-- new clash\n", "never overwrites");
-  assert.equal(await readFile(`${backupsDir}/init.lua.clash-1`, "utf8"), "-- old clash\n", "clash gets a suffix");
-  assert.match(out, /Moved 2 init\.lua backup\(s\)/);
-  assert.match(out, /init\.lua backups kept in/);
-});
-
-test("T429 FR1-A: setup (any part) moves 0.2.x backups out of the state dir", async () => {
-  const f = await fakeCtx(ok("{}"));
-  await mkdir(f.ctx.paths.legacyBackupsDir, { recursive: true });
-  await writeFile(`${f.ctx.paths.legacyBackupsDir}/init.lua.x`, "-- old\n");
-  assert.equal(await setup(f.ctx, { ...ALL }, makePrompter(true), "skill"), 0);
-  assert.ok(!existsSync(f.ctx.paths.legacyBackupsDir), "old dir removed once empty");
-  assert.equal(await readFile(`${f.ctx.paths.backupsDir}/init.lua.x`, "utf8"), "-- old\n");
-  assert.match(f.out.join("\n"), /Moved 1 init\.lua backup\(s\)/);
-});
-
 test("T429 FR1-A: --purge with no backups doesn't claim any were kept", async () => {
   const f = await fakeCtx(ok("{}"));
   await mkdir(f.ctx.paths.stateDir, { recursive: true });
@@ -244,16 +216,3 @@ test("T429 FR1-A: --purge with no backups doesn't claim any were kept", async ()
   assert.ok(!f.out.join("\n").includes("backups kept"));
 });
 
-test("T429 FR2 N-2: a broken symlink (or a subdir) in the old init-backups dir is skipped, not fatal", async () => {
-  const { symlink } = await import("node:fs/promises");
-  const f = await fakeCtx(ok("{}"));
-  const { legacyBackupsDir, backupsDir } = f.ctx.paths;
-  await mkdir(join(legacyBackupsDir, "subdir"), { recursive: true });
-  await symlink(join(legacyBackupsDir, "does-not-exist"), join(legacyBackupsDir, "init.lua.broken-link"));
-  await writeFile(join(legacyBackupsDir, "init.lua.good"), "-- good\n");
-  assert.equal(await setup(f.ctx, { ...ALL }, makePrompter(true), "skill"), 0, f.out.join("\n"));
-  assert.equal(await readFile(join(backupsDir, "init.lua.good"), "utf8"), "-- good\n");
-  assert.ok(!existsSync(join(backupsDir, "init.lua.broken-link")), "the broken link is left where it was");
-  assert.match(f.out.join("\n"), /Moved 1 init\.lua backup\(s\)/);
-  assert.equal(await uninstall(f.ctx, { yes: true, purge: true, serveOff: false }, makePrompter(true)), 0, "uninstall --purge isn't aborted either");
-});

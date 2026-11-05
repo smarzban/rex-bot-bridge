@@ -241,13 +241,13 @@ test("T429 cli: setup webhook --key-file - reads stdin; webhook flags on bare se
   const r = cli(["setup", "webhook", "--url", URL, "--key-file", "-", "--yes", "--no-test"], "X-Webhook-Key: stdin-secret-1\n");
   assert.equal(r.status, 0, r.stderr);
   assertNoSecrets(r.stdout + r.stderr, URL, "stdin-secret-1");
-  const cfg = JSON.parse(await readFile(join(home, ".config/rex-bot-bridge/config.json"), "utf8"));
+  const cfg = JSON.parse(await readFile(join(home, ".config/rex-grokbot-bridge/config.json"), "utf8"));
   assert.deepEqual([cfg.webhook.key, cfg.webhook.header], ["stdin-secret-1", "X-Webhook-Key"]);
 
   const keyFile = join(home, "k");
   await writeFile(keyFile, "file-secret-2\n");
   assert.equal(cli(["setup", "webhook", "--key-file", keyFile, "--yes", "--no-test"]).status, 0);
-  assert.equal(JSON.parse(await readFile(join(home, ".config/rex-bot-bridge/config.json"), "utf8")).webhook.key, "file-secret-2");
+  assert.equal(JSON.parse(await readFile(join(home, ".config/rex-grokbot-bridge/config.json"), "utf8")).webhook.key, "file-secret-2");
 
   for (const args of [["setup", "--webhook-url", URL], ["setup", "--url", URL], ["setup", "webhook", "--mode", "full"], ["setup", "nope"]]) {
     const u = cli(args);

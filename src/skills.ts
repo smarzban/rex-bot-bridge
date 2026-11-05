@@ -2,11 +2,10 @@ import { mkdir, readFile, rm, rmdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { packageRoot } from "./paths.js";
 
-export const SKILL_MARKER = "installed-by: rex-bot-bridge";
+export const SKILL_MARKER = "installed-by: rex-grokbot-bridge";
 
-/** The skill's directory name. Before 0.4.0 it was "rex-bot" (LEGACY_SKILL_NAME). */
+/** The skill's directory name. */
 export const SKILL_NAME = "rex-grokbot";
-export const LEGACY_SKILL_NAME = "rex-bot";
 
 function skillFile(root: string, name = SKILL_NAME): string {
   return join(root, "skills", name, "SKILL.md");
@@ -19,16 +18,6 @@ async function removeOurs(root: string, name: string): Promise<string | null> {
   await rm(file, { force: true });
   await rmdir(join(root, "skills", name)).catch(() => {}); // only if now empty
   return file;
-}
-
-/** Removes the pre-0.4.0 "rex-bot" skill we installed (only with our marker; someone else's is kept). */
-export async function removeLegacySkills(roots: string[]): Promise<string[]> {
-  const removed: string[] = [];
-  for (const root of roots) {
-    const f = await removeOurs(root, LEGACY_SKILL_NAME);
-    if (f) removed.push(f);
-  }
-  return removed;
 }
 
 async function isDir(p: string): Promise<boolean> {
@@ -55,24 +44,24 @@ export async function installSkills(roots: string[], template = join(packageRoot
     }
     const existing = await readOrNull(file);
     if (existing !== null && !existing.includes(SKILL_MARKER)) {
-      skipped.push({ path: file, reason: "a rex-grokbot skill not written by rex-bot-bridge is already there" });
+      skipped.push({ path: file, reason: "a rex-grokbot skill not written by rex-grokbot-bridge is already there" });
       continue;
     }
     await mkdir(join(root, "skills", SKILL_NAME), { recursive: true });
     await writeFile(file, content);
     installed.push(file);
   }
-  return { installed, skipped, legacyRemoved: await removeLegacySkills(roots) };
+  return { installed, skipped };
 }
 
-/** Removes only skills carrying our marker: the current one and the pre-0.4.0 "rex-bot" one. */
+/** Removes only the skill carrying our marker. */
 export async function uninstallSkills(roots: string[]): Promise<string[]> {
   const removed: string[] = [];
   for (const root of roots) {
     const f = await removeOurs(root, SKILL_NAME);
     if (f) removed.push(f);
   }
-  return [...removed, ...(await removeLegacySkills(roots))];
+  return removed;
 }
 
 export async function skillsPresent(roots: string[]): Promise<string[]> {

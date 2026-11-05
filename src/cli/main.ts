@@ -74,7 +74,7 @@ async function serve(): Promise<number> {
     server.once("error", reject);
     server.listen(cfg.port, cfg.host, () => resolve());
   });
-  console.log(`rex-bot-bridge listening on http://${cfg.host}:${cfg.port}/mcp (mode ${await cfg.getMode()}, audit: ${cfg.auditLog})`);
+  console.log(`rex-grokbot-bridge listening on http://${cfg.host}:${cfg.port}/mcp (mode ${await cfg.getMode()}, audit: ${cfg.auditLog})`);
   const stop = () => server.close(() => process.exit(0));
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
@@ -96,7 +96,7 @@ async function runWatcher(): Promise<number> {
   const script = join(ctx.pkgRoot, "lua/bot-watch.lua");
   const child = spawn(ctx.rexBin, ["do", "--all", script], {
     stdio: "inherit",
-    env: { ...process.env, REX_BOT_DIR: ctx.paths.stateDir, REX_BOT_NODE: ctx.node, REX_BOT_CLI: ctx.cli },
+    env: { ...process.env, REX_GROKBOT_DIR: ctx.paths.stateDir, REX_GROKBOT_NODE: ctx.node, REX_GROKBOT_CLI: ctx.cli },
   });
   for (const sig of ["SIGINT", "SIGTERM"] as const) process.on(sig, () => child.kill(sig));
   return new Promise((resolve) => {

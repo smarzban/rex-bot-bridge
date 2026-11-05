@@ -1,21 +1,21 @@
 #!/bin/sh
-# rex-bot-bridge installer (macOS).
+# rex-grokbot-bridge installer (macOS).
 #
-#   curl -fsSL https://raw.githubusercontent.com/smarzban/rex-bot-bridge/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/smarzban/rex-grokbot-bridge/main/install.sh | sh
 #
 # Installs the rex-grokbot CLI with npm (from the npm registry once published, else from GitHub), then
 # offers to run `rex-grokbot setup`. Re-running it upgrades in place. Never uses sudo, never installs Node.
 #
 # Environment:
-#   REX_BOT_SOURCE   npm | github      where to install from (default: npm if published, else github)
-#   REX_BOT_VERSION  npm version or git ref (default: latest / main)
+#   REX_GROKBOT_SOURCE   npm | github      where to install from (default: npm if published, else github)
+#   REX_GROKBOT_VERSION  npm version or git ref (default: latest / main)
 #
 # Everything runs from main(), called on the last line, so a truncated download runs nothing.
 
 set -eu
 
-REPO="smarzban/rex-bot-bridge"
-PKG="rex-bot-bridge"
+REPO="smarzban/rex-grokbot-bridge"
+PKG="rex-grokbot-bridge"
 
 say() { printf '%s\n' "$*"; }
 warn() { printf '⚠️  %s\n' "$*" >&2; }
@@ -26,7 +26,7 @@ die() {
 
 check_macos() {
   if [ "$(uname -s)" != "Darwin" ]; then
-    die "rex-bot-bridge is for macOS (it runs as launchd services next to Rex). This is $(uname -s)."
+    die "rex-grokbot-bridge is for macOS (it runs as launchd services next to Rex). This is $(uname -s)."
   fi
   say "✅ macOS $(sw_vers -productVersion 2>/dev/null || echo)"
 }
@@ -39,7 +39,7 @@ check_node() {
   fi
   node_major=$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)
   if [ "$node_major" -lt 22 ]; then
-    die "Node $(node --version) is too old; rex-bot-bridge needs Node 22 or newer. Upgrade, then run this again:
+    die "Node $(node --version) is too old; rex-grokbot-bridge needs Node 22 or newer. Upgrade, then run this again:
     brew upgrade node
 (or from https://nodejs.org)"
   fi
@@ -107,8 +107,8 @@ installed_version() {
 }
 
 choose_spec() {
-  SOURCE=${REX_BOT_SOURCE:-}
-  version=${REX_BOT_VERSION:-}
+  SOURCE=${REX_GROKBOT_SOURCE:-}
+  version=${REX_GROKBOT_VERSION:-}
   if [ -z "$SOURCE" ]; then
     if npm view "$PKG" version >/dev/null 2>&1; then SOURCE=npm; else SOURCE=github; fi
   fi
@@ -118,7 +118,7 @@ choose_spec() {
       REF=${version:-main}
       SPEC="github:$REPO#$REF"
       ;;
-    *) die "REX_BOT_SOURCE must be npm or github, not '$SOURCE'." ;;
+    *) die "REX_GROKBOT_SOURCE must be npm or github, not '$SOURCE'." ;;
   esac
 }
 
@@ -130,7 +130,7 @@ build_from_github() {
   trap 'rm -rf "$WORK"' EXIT
   say "Downloading $REPO@$REF and building it ..."
   curl -fsSL "https://codeload.github.com/$REPO/tar.gz/$REF" | tar -xzf - -C "$WORK" ||
-    die "Could not download $REPO at '$REF' (check REX_BOT_VERSION)."
+    die "Could not download $REPO at '$REF' (check REX_GROKBOT_VERSION)."
   src=$(find "$WORK" -mindepth 1 -maxdepth 1 -type d | head -n 1)
   [ -f "$src/package.json" ] || die "The download of $REPO@$REF has no package.json."
   # A local build: the user's global prefix settings must not apply here.
@@ -166,7 +166,7 @@ finish() {
 }
 
 main() {
-  say "rex-bot-bridge installer"
+  say "rex-grokbot-bridge installer"
   say ""
   check_macos
   check_node

@@ -10,7 +10,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 
 const base = process.argv[2] || "http://127.0.0.1:7400";
 const token = readFileSync(
-  process.env.REX_BRIDGE_TOKEN_FILE || join(homedir(), ".config/rex-bot-bridge/token"),
+  process.env.REX_BRIDGE_TOKEN_FILE || join(homedir(), ".config/rex-grokbot-bridge/token"),
   "utf8",
 ).trim();
 const client = new Client({ name: "e2e-paste", version: "0.0.0" });

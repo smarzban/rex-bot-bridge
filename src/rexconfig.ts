@@ -1,9 +1,9 @@
-import { copyFile, lstat, mkdir, readdir, readFile, rename, rmdir, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import type { Runner } from "./rex.js";
 
-export const BLOCK_START = "-- >>> rex-bot-bridge >>>";
-export const BLOCK_END = "-- <<< rex-bot-bridge <<<";
+export const BLOCK_START = "-- >>> rex-grokbot-bridge >>>";
+export const BLOCK_END = "-- <<< rex-grokbot-bridge <<<";
 
 /** Lua double-quoted string literal. */
 export function luaString(s: string): string {
@@ -48,13 +48,6 @@ export function removeBlock(content: string): string {
   return before + after;
 }
 
-/** True if the file defines the v1 actions outside our block (e.g. pasted inline). */
-export function hasLegacyInline(content: string): boolean {
-  const r = blockRange(content);
-  const outside = r ? content.slice(0, r.start) + content.slice(r.end) : content;
-  return /name\s*=\s*["'](bot_watch_toggle|bot_watch_list)["']/.test(outside);
-}
-
 async function readRaw(path: string): Promise<Buffer | null> {
   try {
     return await readFile(path);
@@ -82,7 +75,6 @@ export interface RexConfigOptions {
 
 export type RexConfigResult =
   | { status: "installed" | "unchanged" | "removed" | "absent"; backup?: string }
-  | { status: "legacy-inline" }
   | { status: "check-failed"; backup?: string; detail: string };
 
 async function backup(opts: RexConfigOptions, content: Buffer): Promise<string> {
@@ -142,7 +134,6 @@ async function writeChecked(
 export async function installBlock(opts: RexConfigOptions & { actionsPath: string }): Promise<RexConfigResult> {
   const raw = await readRaw(opts.initPath);
   const current = raw?.toString("utf8") ?? "";
-  if (hasLegacyInline(current)) return { status: "legacy-inline" };
   const next = upsertBlock(current, renderBlock(opts.actionsPath));
   if (raw !== null && next === current) return { status: "unchanged" };
   return writeChecked(opts, raw, next, "installed");
@@ -156,48 +147,12 @@ export async function uninstallBlock(opts: RexConfigOptions): Promise<RexConfigR
 }
 
 /** Doctor: is our block there and pointing at an existing file? */
-export async function inspectBlock(initPath: string): Promise<{ present: boolean; actionsPath?: string; legacy: boolean }> {
+export async function inspectBlock(initPath: string): Promise<{ present: boolean; actionsPath?: string }> {
   const content = (await readOrNull(initPath)) ?? "";
   const r = blockRange(content);
   const m = r ? /dofile\("((?:[^"\\]|\\.)*)"\)/.exec(content.slice(r.start, r.end)) : null;
   return {
     present: !!r,
     actionsPath: m?.[1]?.replace(/\\(.)/g, "$1"),
-    legacy: hasLegacyInline(content),
   };
-}
-
-/**
- * Moves init.lua backups from the 0.2.x location (inside the state dir, which `uninstall --purge` deletes)
- * into `to`. Never overwrites: a name that's taken gets -1, -2, … Removes the old dir once empty.
- * Returns the new paths of the moved files.
- */
-export async function migrateBackups(from: string, to: string): Promise<string[]> {
-  let names: string[];
-  try {
-    names = await readdir(from);
-  } catch {
-    return [];
-  }
-  const moved: string[] = [];
-  for (const name of names) {
-    const src = join(from, name);
-    // Skip anything that isn't a regular file now (a broken symlink, a dir, a file that just vanished).
-    if (!(await lstat(src).catch(() => null))?.isFile()) continue;
-    await mkdir(to, { recursive: true, mode: 0o700 });
-    let dest = join(to, name);
-    for (let i = 1; await lstat(dest).then(() => true, () => false); i++) dest = join(to, `${name}-${i}`);
-    try {
-      await rename(src, dest);
-    } catch (e) {
-      const code = (e as NodeJS.ErrnoException).code;
-      if (code === "ENOENT") continue; // vanished mid-run
-      if (code !== "EXDEV") throw e;
-      await copyFile(src, dest);
-      await unlink(src);
-    }
-    moved.push(dest);
-  }
-  await rmdir(from).catch(() => {}); // only if empty
-  return moved;
 }

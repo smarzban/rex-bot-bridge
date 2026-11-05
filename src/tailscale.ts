@@ -35,11 +35,6 @@ export function serveOffArgs(servePort: number): string[] {
   return ["serve", `--https=${servePort}`, "off"];
 }
 
-/** Removes the ≤ 0.4 mapping of `legacyPath` on :443 (only that path; `/` and other paths are untouched). */
-export function legacyServeOffArgs(legacyPath: string): string[] {
-  return ["serve", "--https=443", "--set-path", legacyPath, "off"];
-}
-
 /** Shell-quoted command for display. */
 export function shellCommand(bin: string, args: string[]): string {
   const q = (s: string) => (/^[A-Za-z0-9_./:=@%+-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`);
@@ -125,17 +120,6 @@ export async function portTarget(ts: Runner, servePort: number): Promise<ServeTa
   return { kind: "occupied", target: handlers.map(([path, h]) => `${path} → ${describeHandler(h)}`).join(", ") };
 }
 
-/** What `path` on :443 serves (the ≤ 0.4 location, kept for migration and cleanup). */
-export async function legacyPathTarget(ts: Runner, path: string): Promise<ServeTarget> {
-  const st = await readServeStatus(ts);
-  if ("unknown" in st) return { kind: "unknown", reason: st.unknown };
-  for (const handlers of sitesOn(st, 443)) {
-    const h = handlers[path];
-    if (h !== undefined) return { kind: "occupied", target: describeHandler(h) };
-  }
-  return { kind: "absent" };
-}
-
 /** True when the slot already proxies to `desired` (and nothing else). */
 export function servesDesired(t: ServeTarget, desired: string): boolean {
   return t.kind === "occupied" && t.target === desired;
@@ -144,9 +128,4 @@ export function servesDesired(t: ServeTarget, desired: string): boolean {
 /** The bridge's own origin, https://<mac>.<tailnet>.ts.net:<servePort> (no trailing slash). */
 export function bridgeOrigin(dnsName: string | undefined, servePort: number): string {
   return `https://${dnsName ?? "<this-mac>.<tailnet>.ts.net"}${servePort === 443 ? "" : `:${servePort}`}`;
-}
-
-/** The ≤ 0.4 URL, https://<mac>.<tailnet>.ts.net/rex-bridge. */
-export function legacyUrl(dnsName: string | undefined, path: string): string {
-  return `https://${dnsName ?? "<this-mac>.<tailnet>.ts.net"}${path}`;
 }

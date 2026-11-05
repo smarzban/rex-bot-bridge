@@ -3,10 +3,10 @@ import { userInfo } from "node:os";
 import { isSandboxHome, type Ctx } from "./context.js";
 import { uninstallServices } from "./launchd.js";
 import type { Prompter } from "./prompt.js";
-import { migrateBackups, uninstallBlock } from "./rexconfig.js";
-import { legacyServePath, readSettings } from "./settings.js";
+import { uninstallBlock } from "./rexconfig.js";
+import { readSettings } from "./settings.js";
 import { uninstallSkills } from "./skills.js";
-import { legacyPathTarget, legacyServeOffArgs, portTarget, serveOffArgs, servesDesired, shellCommand } from "./tailscale.js";
+import { portTarget, serveOffArgs, servesDesired, shellCommand } from "./tailscale.js";
 
 export interface UninstallFlags {
   yes: boolean;
@@ -20,15 +20,11 @@ export async function uninstall(ctx: Ctx, flags: UninstallFlags, p: Prompter): P
   const ok = (s: string) => ctx.out(`✅ ${s}`);
   let failed = false;
 
-  if (p.interactive && !(await p.confirm("Remove the rex-bot-bridge services, Rex palette actions and agent skill?", true))) {
+  if (p.interactive && !(await p.confirm("Remove the rex-grokbot-bridge services, Rex palette actions and agent skill?", true))) {
     ctx.out("Nothing changed.");
     return 0;
   }
   const s = await readSettings(paths.configFile);
-  // 0.2.x kept backups inside the state dir; move them out before anything (--purge) deletes it.
-  const migrated = await migrateBackups(paths.legacyBackupsDir, paths.backupsDir);
-  if (migrated.length) ok(`Moved ${migrated.length} init.lua backup(s) from ${paths.legacyBackupsDir} to ${paths.backupsDir}`);
-
   const removed = await uninstallServices(paths, ctx.launchctl);
   ok(removed.length ? `Services stopped and removed: ${removed.join(", ")}` : "No services installed");
 
@@ -39,24 +35,21 @@ export async function uninstall(ctx: Ctx, flags: UninstallFlags, p: Prompter): P
     failed = true;
     ctx.err(`❌ ${r.detail}`);
   } else if (r.status === "removed") {
-    ok(`Removed the rex-bot-bridge block from ${paths.rexInitLua}${"backup" in r && r.backup ? ` (backup: ${r.backup})` : ""}`);
+    ok(`Removed the rex-grokbot-bridge block from ${paths.rexInitLua}${"backup" in r && r.backup ? ` (backup: ${r.backup})` : ""}`);
     if (!isSandboxHome(ctx, userInfo().homedir)) await ctx.rex(["config", "reload"]);
   } else if (r.status === "check-failed") {
     failed = true;
     ctx.err(`❌ rex config check failed after removing our block; restored ${paths.rexInitLua}.\n${r.detail}`);
-  } else ok(`No rex-bot-bridge block in ${paths.rexInitLua}`);
+  } else ok(`No rex-grokbot-bridge block in ${paths.rexInitLua}`);
 
   const skills = await uninstallSkills(paths.skillRoots);
   ok(skills.length ? `Removed agent skill: ${skills.join(", ")}` : "No agent skill installed");
 
-  // Our port mapping, and the ≤ 0.4 path on :443 if it is still there. Only our own mappings are ever offered
-  // for removal; a foreign or unreadable one (and `/` on :443) is left alone.
+  // Our port mapping. Only our own mapping is ever offered for removal; a foreign or unreadable one is left alone.
   const desired = `http://127.0.0.1:${s.port}`;
-  const path = legacyServePath(s);
   const mappings = ctx.tailscaleBin
     ? [
         { what: `port ${s.servePort}`, ours: servesDesired(await portTarget(ctx.tailscale, s.servePort), desired), args: serveOffArgs(s.servePort) },
-        { what: `${path} on port 443 (0.4 and earlier)`, ours: servesDesired(await legacyPathTarget(ctx.tailscale, path), desired), args: legacyServeOffArgs(path) },
       ].filter((m) => m.ours)
     : [];
   for (const m of mappings) {
@@ -79,6 +72,6 @@ export async function uninstall(ctx: Ctx, flags: UninstallFlags, p: Prompter): P
   } else {
     ctx.out(`   Kept ${paths.stateDir} (token, config, watched list). Delete it with: rex-grokbot uninstall --purge`);
   }
-  ctx.out("   To remove the package itself: npm uninstall -g rex-bot-bridge");
+  ctx.out("   To remove the package itself: npm uninstall -g rex-grokbot-bridge");
   return failed ? 1 : 0;
 }

@@ -5,23 +5,16 @@ import { atomicWrite } from "./watch.js";
 export const MODES = ["watched", "full"] as const;
 export type Mode = (typeof MODES)[number];
 
-/** ~/.config/rex-bot-bridge/config.json */
+/** ~/.config/rex-grokbot-bridge/config.json */
 export interface Settings {
   mode: Mode;
   host: string;
   port: number;
   /** The tailnet HTTPS port Tailscale Serve gives the bridge as its own origin (https://<mac>:<servePort>). */
   servePort: number;
-  /**
-   * Legacy (≤ 0.4): the path the bridge used on :443 (`--set-path`). Read only to find and remove that old
-   * mapping; not settable and never used for new installs.
-   */
-  servePath?: string;
   webhook: { url?: string; key?: string; header?: string };
   /** What setup chose not to install, so doctor reports those checks as skipped instead of failed. */
   skipped?: { services?: boolean; serve?: boolean };
-  /** When setup imported the v1 opt-in list. Set once; later runs never import it again. */
-  migratedV1At?: string;
 }
 
 export const DEFAULTS: Settings = {
@@ -35,11 +28,6 @@ export const DEFAULTS: Settings = {
 /** Keys `rex-grokbot config get|set` accepts. Secrets are hidden by `get` unless --show. */
 export const KEYS = ["mode", "port", "host", "servePort", "webhook.url", "webhook.key", "webhook.header"] as const;
 export type Key = (typeof KEYS)[number];
-/** The path ≤ 0.4 mapped on :443, for finding and removing that legacy mapping. */
-export const LEGACY_SERVE_PATH = "/rex-bridge";
-export function legacyServePath(s: Settings): string {
-  return s.servePath || LEGACY_SERVE_PATH;
-}
 
 export const SECRET_KEYS: readonly Key[] = ["webhook.url", "webhook.key"];
 

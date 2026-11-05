@@ -3,9 +3,8 @@ import { dirname, join } from "node:path";
 import { packageRoot, type Paths } from "./paths.js";
 import type { Runner } from "./rex.js";
 
-export const LABELS = { bridge: "com.rexbotbridge.bridge", watch: "com.rexbotbridge.watch" } as const;
+export const LABELS = { bridge: "com.rexgrokbotbridge.bridge", watch: "com.rexgrokbotbridge.watch" } as const;
 export type Service = keyof typeof LABELS;
-export const LEGACY_LABELS = ["com.rex.bot-bridge", "com.rex.bot-watch"];
 
 export function xmlEscape(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -62,13 +61,13 @@ export function serviceSpecs(ctx: ServiceContext): Record<Service, PlistSpec> {
     HOME: ctx.paths.home,
     PATH: servicePath(ctx),
     REX_BIN: ctx.rexBin,
-    REX_BOT_DIR: ctx.paths.stateDir,
+    REX_GROKBOT_DIR: ctx.paths.stateDir,
     ...(ctx.rexServer ? { REX_SERVER: ctx.rexServer } : {}),
   };
   return {
     bridge: {
       label: LABELS.bridge,
-      description: "rex-bot-bridge MCP server",
+      description: "rex-grokbot-bridge MCP server",
       programArguments: [ctx.node, ctx.cli, "serve"],
       workingDirectory: ctx.pkgRoot,
       env,
@@ -76,7 +75,7 @@ export function serviceSpecs(ctx: ServiceContext): Record<Service, PlistSpec> {
     },
     watch: {
       label: LABELS.watch,
-      description: "rex-bot-bridge status watcher",
+      description: "rex-grokbot-bridge status watcher",
       programArguments: [ctx.node, ctx.cli, "watch"],
       workingDirectory: ctx.pkgRoot,
       env,

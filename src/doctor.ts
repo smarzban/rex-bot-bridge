@@ -1,16 +1,13 @@
 import { existsSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import type { Ctx } from "./context.js";
-import { bootstrapCommand, domain, LABELS, LEGACY_LABELS, plistPath, serviceState } from "./launchd.js";
+import { bootstrapCommand, domain, LABELS, plistPath, serviceState } from "./launchd.js";
 import { describe, enrich, postWebhook } from "./notify.js";
 import { checkConfig, inspectBlock } from "./rexconfig.js";
-import { legacyServePath, readSettings } from "./settings.js";
+import { readSettings } from "./settings.js";
 import { skillsPresent } from "./skills.js";
 import {
   bridgeOrigin,
-  legacyPathTarget,
-  legacyServeOffArgs,
-  legacyUrl,
   portTarget,
   serveArgs,
   servesDesired,
@@ -81,7 +78,7 @@ export async function runDoctor(ctx: Ctx, opts: { testWebhook: boolean }): Promi
   else if ((tokenStat.mode & 0o077) !== 0) add("token", "warn", `${paths.tokenFile} is readable by others`, `chmod 600 '${paths.tokenFile}'`);
   else add("token", "ok", `${paths.tokenFile} (mode 600)`);
 
-  // State file modes: an install from before 0.2.0 may have left them 0644.
+  // State files must stay private (mode 600).
   const loose: string[] = [];
   for (const f of [paths.watchedFile, paths.heartbeatFile, paths.tokenFile, paths.configFile]) {
     const st = await stat(f).catch(() => null);
@@ -94,11 +91,8 @@ export async function runDoctor(ctx: Ctx, opts: { testWebhook: boolean }): Promi
 
   // init.lua
   const blk = await inspectBlock(paths.rexInitLua);
-  if (blk.legacy) {
-    add("rex_actions_legacy", "warn", `${paths.rexInitLua} still defines bot_watch_toggle inline (v1)`, "Remove the old inline block, then: rex-grokbot setup rex");
-  }
   if (!blk.present) {
-    add("rex_actions", "fail", `rex-bot-bridge block missing from ${paths.rexInitLua}`, "rex-grokbot setup rex");
+    add("rex_actions", "fail", `rex-grokbot-bridge block missing from ${paths.rexInitLua}`, "rex-grokbot setup rex");
   } else if (!blk.actionsPath || !existsSync(blk.actionsPath)) {
     add("rex_actions", "fail", `init.lua block points at a missing file: ${blk.actionsPath ?? "?"}`, "rex-grokbot setup rex (re-points it at this install)");
   } else {
@@ -121,11 +115,6 @@ export async function runDoctor(ctx: Ctx, opts: { testWebhook: boolean }): Promi
         `See ${paths.logsDir}/${name}.log, then: launchctl kickstart -k gui/$(id -u)/${label}`,
       );
     else add(id, "fail", `${label} not loaded`, existsSync(plistPath(paths, label)) ? bootstrapCommand(paths, label) : "rex-grokbot setup services");
-  }
-  for (const label of LEGACY_LABELS) {
-    if ((await serviceState(label, ctx.launchctl)).loaded) {
-      add("legacy_service", "warn", `v1 service ${label} is still loaded`, `launchctl bootout gui/$(id -u)/${label}`);
-    }
   }
 
   // Bridge health
@@ -194,17 +183,6 @@ export async function runDoctor(ctx: Ctx, opts: { testWebhook: boolean }): Promi
             : `Tailscale Serve has no port ${s.servePort} mapping`;
       const fix = t.kind === "unknown" ? "tailscale serve status" : target ? `rex-grokbot config set servePort <free port>, then: rex-grokbot setup serve` : serveCmd;
       add("serve", "fail", what, fix);
-    }
-
-    // The ≤ 0.4 mapping on :443 (shared with other apps): flag it only when it is ours.
-    const path = legacyServePath(s);
-    if (servesDesired(await legacyPathTarget(ctx.tailscale, path), desired)) {
-      add(
-        "serve_legacy",
-        "warn",
-        `old mapping ${legacyUrl(ts.dnsName, path)} → ${desired} still on port 443 (shared with other apps; the connector should use ${origin}/mcp)`,
-        shellCommand("tailscale", legacyServeOffArgs(path)),
-      );
     }
   }
 

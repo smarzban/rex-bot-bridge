@@ -39,7 +39,7 @@ async function sandbox() {
   const state = async () => ({
     init: await readFile(join(home, ".config/rex/init.lua"), "utf8"),
     skill: existsSync(join(home, ".claude/skills/rex-grokbot/SKILL.md")),
-    config: existsSync(join(home, ".config/rex-bot-bridge/config.json")),
+    config: existsSync(join(home, ".config/rex-grokbot-bridge/config.json")),
     calls: (await readFile(log, "utf8").catch(() => "")).trim().split("\n").filter(Boolean),
   });
   return { home, run, state };
@@ -62,7 +62,7 @@ test("T429 FR1-D cli: setup rex adds only the init.lua block", async () => {
   const r = sb.run("rex");
   assert.equal(r.status, 0, r.stderr + r.stdout);
   const st = await sb.state();
-  assert.match(st.init, /rex-bot-bridge >>>/);
+  assert.match(st.init, /rex-grokbot-bridge >>>/);
   assert.deepEqual([st.skill, st.config], [false, false]);
   assert.ok(st.calls.every((c) => c.startsWith("rex ")), "no tailscale calls");
   assert.ok(!st.calls.some((c) => c === "rex config reload"), "sandbox HOME: never reloads the real Rex");

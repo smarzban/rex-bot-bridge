@@ -35,7 +35,7 @@ async function sandbox(o: { loaded: boolean; kickstartFails?: boolean; serveStat
   );
   await chmod(launchctl, 0o755);
   await chmod(ts, 0o755);
-  const dir = join(home, ".config/rex-bot-bridge");
+  const dir = join(home, ".config/rex-grokbot-bridge");
   await mkdir(dir, { recursive: true, mode: 0o700 });
   await writeFile(join(dir, "token"), FAKE + "\n", { mode: 0o600 });
   const run = (...args: string[]) =>
@@ -74,11 +74,11 @@ test("CLI token --rotate, bridge loaded: new token in the file and alone on stdo
   assert.match(now, /^[A-Za-z0-9_-]{43}$/);
   assert.equal(r.stdout, `${now}\n`);
   assert.ok(!r.stderr.includes(now));
-  assert.match(r.stderr, /restarted com\.rexbotbridge\.bridge/);
+  assert.match(r.stderr, /restarted com\.rexgrokbotbridge\.bridge/);
   assert.match(r.stderr, /update the Authorization header of the rex connector in Grok Bot/);
   const calls = await sb.calls();
-  assert.ok(calls.some((c) => /^print gui\/\d+\/com\.rexbotbridge\.bridge$/.test(c)), calls.join("\n"));
-  assert.ok(calls.some((c) => /^kickstart -k gui\/\d+\/com\.rexbotbridge\.bridge$/.test(c)), calls.join("\n"));
+  assert.ok(calls.some((c) => /^print gui\/\d+\/com\.rexgrokbotbridge\.bridge$/.test(c)), calls.join("\n"));
+  assert.ok(calls.some((c) => /^kickstart -k gui\/\d+\/com\.rexgrokbotbridge\.bridge$/.test(c)), calls.join("\n"));
 });
 
 test("CLI token --rotate, bridge not loaded: rotates, no kickstart", async () => {
@@ -98,6 +98,6 @@ test("CLI token --rotate, kickstart fails: launchctl's error + fix line on stder
   const now = await sb.token();
   assert.notEqual(now, FAKE);
   assert.equal(r.stdout, `${now}\n`);
-  assert.match(r.stderr, /restarting com\.rexbotbridge\.bridge failed: Could not kickstart service: Operation not permitted\n {2}fix: rex-grokbot setup services/);
+  assert.match(r.stderr, /restarting com\.rexgrokbotbridge\.bridge failed: Could not kickstart service: Operation not permitted\n {2}fix: rex-grokbot setup services/);
   assert.ok(!r.stderr.includes(now));
 });

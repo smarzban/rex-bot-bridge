@@ -3,36 +3,32 @@ import { homedir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-/** Every file and directory rex-bot-bridge touches, resolved from HOME (and env overrides). */
+/** Every file and directory rex-grokbot-bridge touches, resolved from HOME (and env overrides). */
 export interface Paths {
   home: string;
-  /** ~/.config/rex-bot-bridge (REX_BOT_DIR overrides). Mode 700. */
+  /** ~/.config/rex-grokbot-bridge (REX_GROKBOT_DIR overrides). Mode 700. */
   stateDir: string;
   tokenFile: string;
   configFile: string;
   watchedFile: string;
   heartbeatFile: string;
   backupsDir: string;
-  /** Where 0.2.x kept init.lua backups (inside stateDir); moved to backupsDir by setup/uninstall. */
-  legacyBackupsDir: string;
-  /** ~/Library/Logs/rex-bot-bridge */
+  /** ~/Library/Logs/rex-grokbot-bridge */
   logsDir: string;
   notifyLog: string;
   auditLog: string;
   /** Rex's init.lua: REX_CONFIG, else $XDG_CONFIG_HOME/rex/init.lua, else ~/.config/rex/init.lua. */
   rexInitLua: string;
   launchAgentsDir: string;
-  /** v1 opt-in list, imported once by setup. */
-  legacyWatchedFile: string;
   /** Parent dirs that get the rex-grokbot skill if they exist. */
   skillRoots: string[];
 }
 
 export function resolvePaths(env: NodeJS.ProcessEnv = process.env): Paths {
   const home = env.HOME || homedir();
-  const stateDir = env.REX_BOT_DIR || join(home, ".config/rex-bot-bridge");
+  const stateDir = env.REX_GROKBOT_DIR || join(home, ".config/rex-grokbot-bridge");
   const xdg = env.XDG_CONFIG_HOME || join(home, ".config");
-  const logsDir = env.REX_BOT_LOG_DIR || join(home, "Library/Logs/rex-bot-bridge");
+  const logsDir = env.REX_GROKBOT_LOG_DIR || join(home, "Library/Logs/rex-grokbot-bridge");
   return {
     home,
     stateDir,
@@ -41,14 +37,12 @@ export function resolvePaths(env: NodeJS.ProcessEnv = process.env): Paths {
     watchedFile: join(stateDir, "watched"),
     heartbeatFile: join(stateDir, "heartbeat"),
     // Next to init.lua, not in stateDir: `uninstall --purge` deletes stateDir and must keep these.
-    backupsDir: join(dirname(env.REX_CONFIG || join(xdg, "rex/init.lua")), "rex-bot-backups"),
-    legacyBackupsDir: join(stateDir, "init-backups"),
+    backupsDir: join(dirname(env.REX_CONFIG || join(xdg, "rex/init.lua")), "rex-grokbot-backups"),
     logsDir,
     notifyLog: join(logsDir, "notify.log"),
-    auditLog: env.REX_BRIDGE_AUDIT_LOG || join(home, ".local/state/rex-bot-bridge/audit.log"),
+    auditLog: env.REX_BRIDGE_AUDIT_LOG || join(home, ".local/state/rex-grokbot-bridge/audit.log"),
     rexInitLua: env.REX_CONFIG || join(xdg, "rex/init.lua"),
     launchAgentsDir: join(home, "Library/LaunchAgents"),
-    legacyWatchedFile: join(xdg, "rex/bot-watch/sessions"),
     skillRoots: [join(home, ".claude"), join(home, ".agents")],
   };
 }

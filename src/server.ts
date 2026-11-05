@@ -19,7 +19,7 @@ function sendJson(res: ServerResponse, status: number, body: unknown, headers: R
 
 /**
  * HTTP front: GET /healthz (no auth), POST/GET/DELETE /mcp (bearer auth, stateless Streamable HTTP).
- * Paths are matched by suffix so the bridge also works behind the legacy `tailscale serve --set-path /rex-bridge`.
+ * Paths are matched by suffix (a proxy in front may add a path prefix).
  * Every `/.well-known/*` path is a plain 404: the bridge has no OAuth, and MCP clients that get our 401 probe
  * `/.well-known/oauth-protected-resource[/mcp]` and `/.well-known/oauth-authorization-server` to find one.
  */
@@ -66,7 +66,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, opts: HttpOptio
   const presented = bearer(req.headers.authorization);
   if (!expected || !presented || !tokenMatches(presented, expected)) {
     // RFC 7235 wants a challenge on 401. No resource_metadata: there is no OAuth here, only a static token.
-    sendJson(res, 401, { error: "unauthorized" }, { "www-authenticate": 'Bearer realm="rex-bot-bridge"' });
+    sendJson(res, 401, { error: "unauthorized" }, { "www-authenticate": 'Bearer realm="rex-grokbot-bridge"' });
     return;
   }
 
@@ -86,7 +86,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, opts: HttpOptio
   await transport.handleRequest(req, res);
 }
 
-/** True for any path with a `.well-known` segment (`/.well-known/…`, or `/rex-bridge/.well-known/…`). */
+/** True for any path with a `.well-known` segment (`/.well-known/…`, or `/prefix/.well-known/…`). */
 export function isWellKnown(path: string): boolean {
   return path.split("/").includes(".well-known");
 }
