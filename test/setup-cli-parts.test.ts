@@ -1,4 +1,4 @@
-// T429 FR1-D: `rex-bot setup <part>` through the real CLI (sandbox HOME, stub rex/tailscale on REX_BIN /
+// T429 FR1-D: `rex-grokbot setup <part>` through the real CLI (sandbox HOME, stub rex/tailscale on REX_BIN /
 // TAILSCALE_BIN that log their calls) runs only that part. `skills` is an alias of `skill`.
 // `setup services` isn't run here: the CLI always uses the real /bin/launchctl (unit-tested with a fake
 // launchctl in setup-parts.test.ts).
@@ -31,14 +31,14 @@ async function sandbox() {
   await chmod(rex, 0o755);
   await chmod(ts, 0o755);
   const run = (...args: string[]) =>
-    spawnSync(process.execPath, ["--import", "tsx", join(ROOT, "src/cli/rex-bot.ts"), "setup", ...args, "--yes"], {
+    spawnSync(process.execPath, ["--import", "tsx", join(ROOT, "src/cli/rex-grokbot.ts"), "setup", ...args, "--yes"], {
       cwd: ROOT,
       env: childEnv({ HOME: home, REX_BIN: rex, TAILSCALE_BIN: ts }),
       encoding: "utf8",
     });
   const state = async () => ({
     init: await readFile(join(home, ".config/rex/init.lua"), "utf8"),
-    skill: existsSync(join(home, ".claude/skills/rex-bot/SKILL.md")),
+    skill: existsSync(join(home, ".claude/skills/rex-grokbot/SKILL.md")),
     config: existsSync(join(home, ".config/rex-bot-bridge/config.json")),
     calls: (await readFile(log, "utf8").catch(() => "")).trim().split("\n").filter(Boolean),
   });

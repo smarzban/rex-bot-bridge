@@ -11,7 +11,7 @@ export interface Config {
   heartbeatFile: string;
   auditLog: string;
   rexBin: string;
-  /** Read per request so `rex-bot config set mode …` applies without a restart. */
+  /** Read per request so `rex-grokbot config set mode …` applies without a restart. */
   getMode: () => Promise<Mode>;
 }
 

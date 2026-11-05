@@ -1,5 +1,5 @@
-// T428/T429: `rex-bot setup webhook` (forgiving prompts, flags, Enter keeps saved values, test post),
-// and bare `rex-bot setup` never asking for the webhook.
+// T428/T429: `rex-grokbot setup webhook` (forgiving prompts, flags, Enter keeps saved values, test post),
+// and bare `rex-grokbot setup` never asking for the webhook.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
@@ -99,8 +99,8 @@ test("T429 setup: bare setup never asks a webhook question, interactive or not, 
     assert.equal(await setup(f.ctx, { ...SETUP_FLAGS }, p), 0);
     assert.ok(!asked.some((q) => /webhook|key|header|token/i.test(q)), JSON.stringify(asked));
     const out = f.out.join("\n");
-    assert.ok(out.trimEnd().endsWith("3. Check everything: rex-bot doctor --test-webhook"), out);
-    assert.ok(out.includes("2. Add the routine's webhook: rex-bot setup webhook"));
+    assert.ok(out.trimEnd().endsWith("3. Check everything: rex-grokbot doctor --test-webhook"), out);
+    assert.ok(out.includes("2. Add the routine's webhook: rex-grokbot setup webhook"));
   }
 });
 
@@ -217,7 +217,7 @@ test("T429 webhook flags: usage errors exit 2 and save nothing", async () => {
     const f = await fakeCtx({ stdout: "{}", stderr: "", code: 0 });
     assert.equal(await setupWebhook(f.ctx, flags, makePrompter(true)), 2, JSON.stringify(flags));
     assert.equal((await readSettings(f.ctx.paths.configFile)).webhook.url, undefined);
-    assert.match(f.out.join("\n"), /rex-bot setup webhook --help/);
+    assert.match(f.out.join("\n"), /rex-grokbot setup webhook --help/);
   }
 });
 
@@ -232,7 +232,7 @@ test("T429 webhook flags: --yes with only --url keeps the saved key and header",
 test("T429 cli: setup webhook --key-file - reads stdin; webhook flags on bare setup are a usage error", async () => {
   const home = await tempDir();
   const cli = (args: string[], input?: string) =>
-    spawnSync(process.execPath, ["--import", "tsx", join(ROOT, "src/cli/rex-bot.ts"), ...args], {
+    spawnSync(process.execPath, ["--import", "tsx", join(ROOT, "src/cli/rex-grokbot.ts"), ...args], {
       cwd: ROOT,
       env: childEnv({ HOME: home }),
       encoding: "utf8",
@@ -317,13 +317,13 @@ test("T429 webhook test post: answering no to the test question sends nothing", 
   const r = await postTest(200, { [TEST_QUESTION]: false });
   assert.equal(r.code, 0);
   assert.equal(r.got.length, 0);
-  assert.match(r.out, /rex-bot doctor --test-webhook/);
+  assert.match(r.out, /rex-grokbot doctor --test-webhook/);
 });
 
-test("T428 cli: `rex-bot --version` / `-v` exit 0 and print exactly the package.json version", async () => {
+test("T428 cli: `rex-grokbot --version` / `-v` exit 0 and print exactly the package.json version", async () => {
   const pkg = JSON.parse(await readFile(join(ROOT, "package.json"), "utf8")) as { version: string };
   for (const flag of ["--version", "-v"]) {
-    const r = spawnSync(process.execPath, ["--import", "tsx", join(ROOT, "src/cli/rex-bot.ts"), flag], {
+    const r = spawnSync(process.execPath, ["--import", "tsx", join(ROOT, "src/cli/rex-grokbot.ts"), flag], {
       cwd: ROOT,
       env: childEnv({ HOME: await tempDir() }),
       encoding: "utf8",
@@ -339,7 +339,7 @@ test("T429 FR1-E: setup webhook writes only webhook.* — a mode change during t
   const p = scriptedPrompter({ [URL_Q]: URL, [HEADER_Q]: "" });
   const ask = p.ask.bind(p);
   p.ask = async (q, o) => {
-    // While the key question is open, someone runs `rex-bot config set mode full` / `port 7411`.
+    // While the key question is open, someone runs `rex-grokbot config set mode full` / `port 7411`.
     if (q.includes(KEY_Q)) await writeSettings(f.ctx.paths.configFile, { ...DEFAULTS, mode: "full", port: 7411 });
     return q.includes(KEY_Q) ? "k-secret-e" : ask(q, o);
   };

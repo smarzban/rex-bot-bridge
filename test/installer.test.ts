@@ -178,14 +178,14 @@ test("plists: paths with spaces and XML specials are escaped and pass plutil -li
   const specs = serviceSpecs({
     paths,
     node: "/opt/node <22>/bin/node",
-    cli: "/lib/node_modules/rex-bot-bridge/dist/cli/rex-bot.js",
+    cli: "/lib/node_modules/rex-bot-bridge/dist/cli/rex-grokbot.js",
     rexBin,
     pkgRoot: "/lib/node_modules/rex-bot-bridge",
     rexServer: "unix:///Users/x/Library/Application%20Support/rex/server.sock",
   });
   assert.equal(specs.watch.env.REX_SERVER, "unix:///Users/x/Library/Application%20Support/rex/server.sock");
-  assert.deepEqual(specs.bridge.programArguments.slice(1), ["/lib/node_modules/rex-bot-bridge/dist/cli/rex-bot.js", "serve"]);
-  assert.deepEqual(specs.watch.programArguments.slice(1), ["/lib/node_modules/rex-bot-bridge/dist/cli/rex-bot.js", "watch"]);
+  assert.deepEqual(specs.bridge.programArguments.slice(1), ["/lib/node_modules/rex-bot-bridge/dist/cli/rex-grokbot.js", "serve"]);
+  assert.deepEqual(specs.watch.programArguments.slice(1), ["/lib/node_modules/rex-bot-bridge/dist/cli/rex-grokbot.js", "watch"]);
   assert.equal(specs.bridge.env.REX_BIN, rexBin);
   assert.ok(specs.bridge.env.PATH!.startsWith(rexBin.replace(/\/rex$/, "") + ":"));
   assert.equal(specs.watch.log, join(home, "Library/Logs/rex-bot-bridge/watch.log"));
@@ -289,7 +289,7 @@ test("notify/say CLI: stdout and stderr never contain the URL or key", async () 
   const s = await sink();
   const home = await tempDir();
   const KEY = "fixture-key-2"; // not a secret: test fixture
-  const cli = join(import.meta.dirname, "../src/cli/rex-bot.ts");
+  const cli = join(import.meta.dirname, "../src/cli/rex-grokbot.ts");
   const env = childEnv({ HOME: home, REX_SESSION: "session:test", REX_BLOCK: "block:test" });
   const runCli = (args: string[], input?: string) => {
     const p = execFileP(process.execPath, ["--import", "tsx", cli, ...args], { env });
@@ -351,18 +351,18 @@ test("skills: installed only under existing roots; uninstall removes only ours",
   const agents = join(home, ".agents");
   await mkdir(claude);
   const r = await installSkills([claude, agents]);
-  assert.deepEqual(r.installed, [join(claude, "skills/rex-bot/SKILL.md")]);
+  assert.deepEqual(r.installed, [join(claude, "skills/rex-grokbot/SKILL.md")]);
   assert.equal(r.skipped.length, 1);
   assert.ok((await readFile(r.installed[0]!, "utf8")).includes(SKILL_MARKER));
 
-  // Someone else's rex-bot skill is never overwritten or removed.
-  await mkdir(join(agents, "skills/rex-bot"), { recursive: true });
-  await writeFile(join(agents, "skills/rex-bot/SKILL.md"), "---\nname: rex-bot\n---\nmine\n");
+  // Someone else's rex-grokbot skill is never overwritten or removed.
+  await mkdir(join(agents, "skills/rex-grokbot"), { recursive: true });
+  await writeFile(join(agents, "skills/rex-grokbot/SKILL.md"), "---\nname: rex-grokbot\n---\nmine\n");
   const r2 = await installSkills([claude, agents]);
   assert.equal(r2.skipped.find((s) => s.path.startsWith(agents))?.reason.includes("not written by"), true);
-  assert.deepEqual(await uninstallSkills([claude, agents]), [join(claude, "skills/rex-bot/SKILL.md")]);
-  assert.equal(await readFile(join(agents, "skills/rex-bot/SKILL.md"), "utf8"), "---\nname: rex-bot\n---\nmine\n");
-  await assert.rejects(stat(join(claude, "skills/rex-bot")));
+  assert.deepEqual(await uninstallSkills([claude, agents]), [join(claude, "skills/rex-grokbot/SKILL.md")]);
+  assert.equal(await readFile(join(agents, "skills/rex-grokbot/SKILL.md"), "utf8"), "---\nname: rex-grokbot\n---\nmine\n");
+  await assert.rejects(stat(join(claude, "skills/rex-grokbot")));
 });
 
 // ---------- tailscale ----------

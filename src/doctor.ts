@@ -62,12 +62,12 @@ export async function runDoctor(ctx: Ctx, opts: { testWebhook: boolean }): Promi
       /* ignore */
     }
     if (v.code === 0) add("rex_server", "ok", `Rex server reachable (API revision ${rev ?? "?"})`);
-    else add("rex_server", "fail", "Rex server not reachable", "Open Rex, then re-run `rex-bot doctor`");
+    else add("rex_server", "fail", "Rex server not reachable", "Open Rex, then re-run `rex-grokbot doctor`");
   }
 
   // Token + config
   const tokenStat = await stat(paths.tokenFile).catch(() => null);
-  if (!tokenStat) add("token", "fail", `no token at ${paths.tokenFile}`, "rex-bot token (or rex-bot setup)");
+  if (!tokenStat) add("token", "fail", `no token at ${paths.tokenFile}`, "rex-grokbot setup");
   else if ((tokenStat.mode & 0o077) !== 0) add("token", "warn", `${paths.tokenFile} is readable by others`, `chmod 600 '${paths.tokenFile}'`);
   else add("token", "ok", `${paths.tokenFile} (mode 600)`);
 
@@ -85,12 +85,12 @@ export async function runDoctor(ctx: Ctx, opts: { testWebhook: boolean }): Promi
   // init.lua
   const blk = await inspectBlock(paths.rexInitLua);
   if (blk.legacy) {
-    add("rex_actions_legacy", "warn", `${paths.rexInitLua} still defines bot_watch_toggle inline (v1)`, "Remove the old inline block, then: rex-bot setup rex");
+    add("rex_actions_legacy", "warn", `${paths.rexInitLua} still defines bot_watch_toggle inline (v1)`, "Remove the old inline block, then: rex-grokbot setup rex");
   }
   if (!blk.present) {
-    add("rex_actions", "fail", `rex-bot-bridge block missing from ${paths.rexInitLua}`, "rex-bot setup rex");
+    add("rex_actions", "fail", `rex-bot-bridge block missing from ${paths.rexInitLua}`, "rex-grokbot setup rex");
   } else if (!blk.actionsPath || !existsSync(blk.actionsPath)) {
-    add("rex_actions", "fail", `init.lua block points at a missing file: ${blk.actionsPath ?? "?"}`, "rex-bot setup rex (re-points it at this install)");
+    add("rex_actions", "fail", `init.lua block points at a missing file: ${blk.actionsPath ?? "?"}`, "rex-grokbot setup rex (re-points it at this install)");
   } else {
     const complaint = ctx.rexBin ? await checkConfig(ctx.rex, paths.rexInitLua) : "rex not found";
     if (complaint) add("rex_actions", "fail", `rex config check failed: ${complaint}`, `Fix ${paths.rexInitLua}, then \`rex config check\``);
@@ -102,7 +102,7 @@ export async function runDoctor(ctx: Ctx, opts: { testWebhook: boolean }): Promi
     const st = await serviceState(label, ctx.launchctl);
     const id = `service_${name}`;
     if (st.running) add(id, "ok", `${label} running (pid ${st.pid ?? "?"})`);
-    else if (servicesSkipped && !st.loaded) add(id, "warn", `${label} not installed (setup --no-services)`, "rex-bot setup services");
+    else if (servicesSkipped && !st.loaded) add(id, "warn", `${label} not installed (setup --no-services)`, "rex-grokbot setup services");
     else if (st.loaded)
       add(
         id,
@@ -110,7 +110,7 @@ export async function runDoctor(ctx: Ctx, opts: { testWebhook: boolean }): Promi
         `${label} loaded but not running (last exit ${st.lastExit ?? "?"})`,
         `See ${paths.logsDir}/${name}.log, then: launchctl kickstart -k gui/$(id -u)/${label}`,
       );
-    else add(id, "fail", `${label} not loaded`, existsSync(plistPath(paths, label)) ? bootstrapCommand(paths, label) : "rex-bot setup services");
+    else add(id, "fail", `${label} not loaded`, existsSync(plistPath(paths, label)) ? bootstrapCommand(paths, label) : "rex-grokbot setup services");
   }
   for (const label of LEGACY_LABELS) {
     if ((await serviceState(label, ctx.launchctl)).loaded) {
@@ -124,7 +124,7 @@ export async function runDoctor(ctx: Ctx, opts: { testWebhook: boolean }): Promi
   if (local.status === 200 && local.body?.ok) {
     add("bridge_local", local.body.rex_reachable ? "ok" : "warn", `bridge /healthz on ${s.host}:${s.port}: rex_reachable=${local.body.rex_reachable}`);
   } else {
-    add("bridge_local", bridgeLevel, `bridge not answering on ${s.host}:${s.port} (${local.error ?? `HTTP ${local.status}`})`, servicesSkipped ? "rex-bot serve (or: rex-bot setup services)" : `See ${paths.logsDir}/bridge.log, then: launchctl kickstart -k ${domain()}/${LABELS.bridge}`);
+    add("bridge_local", bridgeLevel, `bridge not answering on ${s.host}:${s.port} (${local.error ?? `HTTP ${local.status}`})`, servicesSkipped ? "rex-grokbot serve (or: rex-grokbot setup services)" : `See ${paths.logsDir}/bridge.log, then: launchctl kickstart -k ${domain()}/${LABELS.bridge}`);
   }
 
   // Watcher heartbeat
@@ -136,7 +136,7 @@ export async function runDoctor(ctx: Ctx, opts: { testWebhook: boolean }): Promi
     /* none */
   }
   if (age !== null && age < HEARTBEAT_MAX_S) add("watcher", "ok", `watcher heartbeat ${age}s ago`);
-  else add("watcher", bridgeLevel, age === null ? "no watcher heartbeat yet" : `watcher heartbeat is ${age}s old`, servicesSkipped ? "rex-bot watch (or: rex-bot setup services)" : `See ${paths.logsDir}/watch.log, then: launchctl kickstart -k ${domain()}/${LABELS.watch}`);
+  else add("watcher", bridgeLevel, age === null ? "no watcher heartbeat yet" : `watcher heartbeat is ${age}s old`, servicesSkipped ? "rex-grokbot watch (or: rex-grokbot setup services)" : `See ${paths.logsDir}/watch.log, then: launchctl kickstart -k ${domain()}/${LABELS.watch}`);
 
   // Tailscale
   const ts = await tailscaleStatus(ctx.tailscale);
@@ -176,7 +176,7 @@ export async function runDoctor(ctx: Ctx, opts: { testWebhook: boolean }): Promi
 
   // Webhook
   if (!s.webhook.url) {
-    add("webhook", "warn", "webhook not configured: status pushes and `rex-bot say` go nowhere", "rex-bot setup webhook");
+    add("webhook", "warn", "webhook not configured: status pushes and `rex-grokbot say` go nowhere", "rex-grokbot setup webhook");
   } else {
     add("webhook", "ok", `webhook configured${s.webhook.key ? ` (key in ${s.webhook.header ?? "Authorization"})` : " (no key)"}`);
     if (opts.testWebhook) {
@@ -187,7 +187,7 @@ export async function runDoctor(ctx: Ctx, opts: { testWebhook: boolean }): Promi
 
   // Skills (informational)
   const skills = await skillsPresent(paths.skillRoots);
-  add("skills", skills.length ? "ok" : "warn", skills.length ? `agent skill installed: ${skills.join(", ")}` : "agent skill not installed", skills.length ? undefined : "rex-bot setup skill");
+  add("skills", skills.length ? "ok" : "warn", skills.length ? `agent skill installed: ${skills.join(", ")}` : "agent skill not installed", skills.length ? undefined : "rex-grokbot setup skill");
 
   return checks;
 }

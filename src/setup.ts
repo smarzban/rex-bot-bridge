@@ -13,7 +13,7 @@ import { serveArgs, servesDesired, serveTarget, shellCommand, tailscaleStatus } 
 import { ensureToken } from "./token.js";
 import { parseWatched, WatchFile } from "./watch.js";
 
-/** The parts `rex-bot setup <part>` runs on their own. Bare `setup` runs them all (webhook is separate). */
+/** The parts `rex-grokbot setup <part>` runs on their own. Bare `setup` runs them all (webhook is separate). */
 export const PARTS = ["rex", "services", "serve", "skill"] as const;
 export type Part = (typeof PARTS)[number];
 
@@ -26,12 +26,12 @@ export interface SetupFlags {
   rexConfig: boolean;
 }
 
-/** The last thing bare `rex-bot setup` prints. */
+/** The last thing bare `rex-grokbot setup` prints. */
 export const NEXT_BLOCK = `Next
   1. Set up Grok Bot: ${DOC_URL}
      (or give your Grok Bot this address: ${DOC_RAW_URL})
-  2. Add the routine's webhook: rex-bot setup webhook
-  3. Check everything: rex-bot doctor --test-webhook`;
+  2. Add the routine's webhook: rex-grokbot setup webhook
+  3. Check everything: rex-grokbot doctor --test-webhook`;
 
 const SECTION_TITLES: Record<Part, string> = {
   rex: "Rex palette",
@@ -44,7 +44,7 @@ export const LEGACY_SESSION_LABELS = ["rex-bridge", "bot-watch"];
 
 const MODE_HELP = `Powers for the bot:
   watched  (recommended) the bot can only read, type into, and close panes in sessions you opted in
-           (palette "Bot: Watch / Unwatch This Session" or \`rex-bot watch add <session>\`), plus new
+           (palette "Bot: Watch / Unwatch This Session" or \`rex-grokbot watch add <session>\`), plus new
            sessions it spawns. It can list every session.
   full     the bot can drive every Rex session on this Mac.`;
 
@@ -159,8 +159,8 @@ async function settingsSection(ctx: Ctx, out: Printer, flags: SetupFlags, p: Pro
     s.mode = await p.choose("Mode", MODES, "watched");
   }
   out.ok(`Mode: ${s.mode}${hadSettings && !flags.mode ? " (kept)" : ""}`);
-  if (s.webhook.url) out.ok("Webhook configured (change it: rex-bot setup webhook)");
-  else out.warn("Webhook not set yet (step 2 under Next)", "rex-bot setup webhook");
+  // A fresh install has no webhook yet; that's step 2 under Next, not a problem, so no warning.
+  if (s.webhook.url) out.ok("Webhook configured (change it: rex-grokbot setup webhook)");
   s.skipped = { services: !flags.services, serve: !flags.serve };
   await writeSettings(paths.configFile, s);
   return s;
@@ -173,14 +173,14 @@ async function rexSection(ctx: Ctx, out: Printer): Promise<void> {
     (e: Error) => ({ status: "error" as const, detail: e.message }),
   );
   if (r.status === "error") {
-    out.fail(r.detail, "rex-bot setup rex");
+    out.fail(r.detail, "rex-grokbot setup rex");
   } else if (r.status === "legacy-inline") {
     out.warn(
       `${paths.rexInitLua} already defines bot_watch_toggle / bot_watch_list inline (v1).`,
-      "Remove that old block by hand (the two rex.action{…} entries and their helpers), then: rex-bot setup rex",
+      "Remove that old block by hand (the two rex.action{…} entries and their helpers), then: rex-grokbot setup rex",
     );
   } else if (r.status === "check-failed") {
-    out.fail(`rex config check failed after editing ${paths.rexInitLua}; restored the previous file.\n${r.detail}`, `Fix ${paths.rexInitLua} (rex config check), then: rex-bot setup rex`);
+    out.fail(`rex config check failed after editing ${paths.rexInitLua}; restored the previous file.\n${r.detail}`, `Fix ${paths.rexInitLua} (rex config check), then: rex-grokbot setup rex`);
   } else {
     out.ok(`Palette actions ${r.status === "unchanged" ? "already in" : "added to"} ${paths.rexInitLua}${r.backup ? ` (backup: ${r.backup})` : ""}`);
     if (r.status === "installed") {
@@ -214,7 +214,7 @@ async function servicesSection(ctx: Ctx, out: Printer, s: Settings, p: Prompter)
       "curl -fsSL https://raw.githubusercontent.com/smarzban/rex-bot-bridge/main/install.sh | sh",
     );
     if (!(await p.confirm("Install services pointing at this npx cache anyway?", false))) {
-      out.warn("Services not installed.", "rex-bot setup services (from a global install)");
+      out.warn("Services not installed.", "rex-grokbot setup services (from a global install)");
       return false;
     }
   }
@@ -231,7 +231,7 @@ async function servicesSection(ctx: Ctx, out: Printer, s: Settings, p: Prompter)
       { sleep: ctx.sleep },
     );
   } catch (e) {
-    out.fail(`Could not write the services: ${(e as Error).message}`, "rex-bot setup services");
+    out.fail(`Could not write the services: ${(e as Error).message}`, "rex-grokbot setup services");
     return false;
   }
   for (const r of results) {
@@ -248,7 +248,7 @@ async function serveSection(ctx: Ctx, out: Printer, s: Settings, p: Prompter): P
   const desired = `http://127.0.0.1:${s.port}`;
   const cmd = shellCommand("tailscale", serveArgs(s.servePath, s.port));
   if (!ctx.tailscaleBin || !ts.running) {
-    out.warn(`Tailscale is not running${ctx.tailscaleBin ? "" : " (tailscale CLI not found)"}.`, `Start Tailscale, then: rex-bot setup serve`);
+    out.warn(`Tailscale is not running${ctx.tailscaleBin ? "" : " (tailscale CLI not found)"}.`, `Start Tailscale, then: rex-grokbot setup serve`);
     return false;
   }
   const current = await serveTarget(ctx.tailscale, s.servePath);
@@ -284,13 +284,14 @@ async function serveSection(ctx: Ctx, out: Printer, s: Settings, p: Prompter): P
 async function skillSection(ctx: Ctx, out: Printer): Promise<void> {
   const r = await installSkills(ctx.paths.skillRoots);
   for (const f of r.installed) out.ok(`Installed: ${f}`);
+  for (const f of r.legacyRemoved) out.ok(`Removed the old rex-bot skill: ${f}`);
   for (const k of r.skipped) out.note(`Not installed at ${k.path}: ${k.reason}`);
   if (!r.installed.length) out.warn("No agent skill installed (needs ~/.claude or ~/.agents).");
 }
 
 /**
- * `rex-bot setup` (no part): Checks, Settings, then every part the flags allow, then the Next block.
- * `rex-bot setup <part>`: Checks, then that part only.
+ * `rex-grokbot setup` (no part): Checks, Settings, then every part the flags allow, then the Next block.
+ * `rex-grokbot setup <part>`: Checks, then that part only.
  */
 export async function setup(ctx: Ctx, flags: SetupFlags, p: Prompter, part?: Part): Promise<number> {
   const out = printer(ctx);
@@ -314,23 +315,23 @@ export async function setup(ctx: Ctx, flags: SetupFlags, p: Prompter, part?: Par
         await writeSettings(ctx.paths.configFile, s);
       }
     }
-    ctx.out("\nNext: rex-bot doctor");
+    ctx.out("\nNext: rex-grokbot doctor");
     return out.failed ? 1 : 0;
   }
 
   const s = await settingsSection(ctx, out, flags, p);
   out.section(SECTION_TITLES.rex);
   if (flags.rexConfig) await rexSection(ctx, out);
-  else out.warn("Skipped (--no-rex-config).", "rex-bot setup rex");
+  else out.warn("Skipped (--no-rex-config).", "rex-grokbot setup rex");
   out.section(SECTION_TITLES.services);
   if (flags.services) await servicesSection(ctx, out, s, p);
-  else out.warn("Skipped (--no-services). Run the bridge and watcher yourself (rex-bot serve / rex-bot watch), or later:", "rex-bot setup services");
+  else out.warn("Skipped (--no-services). Run the bridge and watcher yourself (rex-grokbot serve / rex-grokbot watch), or later:", "rex-grokbot setup services");
   out.section(SECTION_TITLES.serve);
   if (flags.serve) await serveSection(ctx, out, s, p);
-  else out.warn("Skipped (--no-serve).", "rex-bot setup serve");
+  else out.warn("Skipped (--no-serve).", "rex-grokbot setup serve");
   out.section(SECTION_TITLES.skill);
   if (flags.skills) await skillSection(ctx, out);
-  else out.warn("Skipped (--no-skills).", "rex-bot setup skill");
+  else out.warn("Skipped (--no-skills).", "rex-grokbot setup skill");
 
   ctx.out("\n" + NEXT_BLOCK);
   return out.failed ? 1 : 0;

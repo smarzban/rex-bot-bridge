@@ -9,8 +9,7 @@ import { resolvePaths } from "../src/paths.js";
 import { childEnv, tempDir } from "./helpers.js";
 
 const run = promisify(execFile);
-const bridgeCli = join(import.meta.dirname, "../src/cli/bridge.ts");
-const rexBotCli = join(import.meta.dirname, "../src/cli/rex-bot.ts");
+const rexBotCli = join(import.meta.dirname, "../src/cli/rex-grokbot.ts");
 
 test("resolvePaths: state under ~/.config/rex-bot-bridge, init.lua via REX_CONFIG > XDG > ~/.config", () => {
   const p = resolvePaths({ HOME: "/h" });
@@ -64,32 +63,31 @@ async function cli(file: string, args: string[], env: Record<string, string>, in
   );
 }
 
-test("token: prints only the path; the token only with --show; dir 700 + file 600", async () => {
+test("token: no token yet → stderr hint, exit 1, nothing on stdout, no file created", async () => {
   const home = await tempDir();
-  const env = { HOME: home };
-  const file = join(home, ".config/rex-bot-bridge/token");
+  const r = await cli(rexBotCli, ["token"], { HOME: home });
+  assert.equal(r.code, 1);
+  assert.equal(r.stdout, "");
+  assert.equal(r.stderr, "rex-grokbot: no token yet; run rex-grokbot setup\n");
+  await assert.rejects(stat(join(home, ".config/rex-bot-bridge/token")));
+});
 
-  const created = await cli(bridgeCli, ["token"], env);
-  const token = (await readFile(file, "utf8")).trim();
-  assert.match(token, /^[A-Za-z0-9_-]{43}$/);
-  assert.equal(created.stdout, `created: ${file}\n`);
-  assert.ok(!created.stdout.includes(token) && !created.stderr.includes(token));
-  assert.equal((await stat(file)).mode & 0o777, 0o600);
-  assert.equal((await stat(join(home, ".config/rex-bot-bridge"))).mode & 0o777, 0o700);
-
-  assert.equal((await cli(rexBotCli, ["token"], env)).stdout, `exists: ${file}\n`);
-  assert.equal((await cli(rexBotCli, ["token", "--show"], env)).stdout, `exists: ${file}\n${token}\n`);
-
-  const rotated = await cli(bridgeCli, ["token", "--rotate"], env);
-  const newToken = (await readFile(file, "utf8")).trim();
-  assert.notEqual(newToken, token);
-  assert.equal(rotated.stdout, `rotated: ${file}\n`);
-  assert.ok(!rotated.stdout.includes(newToken));
+test("token: prints exactly the token line and nothing else; --show is gone", async () => {
+  const home = await tempDir();
+  const dir = join(home, ".config/rex-bot-bridge");
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  const fake = "fake-test-token-0123456789abcdefghijklmnopqrstu";
+  await writeFile(join(dir, "token"), fake + "\n", { mode: 0o600 });
+  const r = await cli(rexBotCli, ["token"], { HOME: home });
+  assert.deepEqual([r.code, r.stdout, r.stderr], [0, `${fake}\n`, ""]);
+  const s = await cli(rexBotCli, ["token", "--show"], { HOME: home });
+  assert.equal(s.code, 2);
+  assert.equal(s.stdout, "");
 });
 
 test("serve refuses to start without a token", async () => {
   const home = await tempDir();
-  const r = await cli(bridgeCli, ["serve"], { HOME: home, REX_BRIDGE_PORT: "1" });
+  const r = await cli(rexBotCli, ["serve"], { HOME: home, REX_BRIDGE_PORT: "1" });
   assert.equal(r.code, 1);
   assert.match(r.stderr, /no token at .*\.config\/rex-bot-bridge\/token/);
 });
@@ -133,9 +131,10 @@ test("say exits 0 with a clear message when no webhook is configured", async () 
 
 test("--help lists the subcommands", async () => {
   const r = await cli(rexBotCli, ["--help"], {});
-  for (const c of ["setup", "doctor", "uninstall", "serve", "watch", "token", "config", "say", "whoami", "notify", "grokbot"]) {
+  for (const c of ["setup", "doctor", "uninstall", "serve", "watch", "token", "url", "config", "say", "whoami", "notify"]) {
     assert.match(r.stdout, new RegExp(`^  ${c} `, "m"));
   }
+  assert.ok(!/^ {2}grokbot /m.test(r.stdout), "grokbot is gone");
 });
 
 test("CLI subprocesses get a scratch env: inherited REX_*/XDG/token overrides never leak in", async () => {
@@ -147,9 +146,13 @@ test("CLI subprocesses get a scratch env: inherited REX_*/XDG/token overrides ne
   process.env.XDG_CONFIG_HOME = join(home, "leaked-xdg");
   process.env.REX_BOT_DIR = join(home, "leaked-dir");
   try {
-    const r = await cli(rexBotCli, ["token", "--rotate"], { HOME: home });
+    // Plain `token`, never --rotate here: the CLI uses the real launchctl, and --rotate would restart this
+    // Mac's real bridge service (rotation is covered with a fake launchctl in credentials.test.ts).
+    await mkdir(join(home, ".config/rex-bot-bridge"), { recursive: true, mode: 0o700 });
+    await writeFile(join(home, ".config/rex-bot-bridge/token"), "fake-scratch-env-token\n", { mode: 0o600 });
+    const r = await cli(rexBotCli, ["token"], { HOME: home });
     assert.equal(r.code, 0);
-    assert.equal(r.stdout, `rotated: ${join(home, ".config/rex-bot-bridge/token")}\n`);
+    assert.equal(r.stdout, "fake-scratch-env-token\n");
     await assert.rejects(stat(join(home, "leaked-token")));
   } finally {
     for (const k of ["REX_BRIDGE_TOKEN_FILE", "XDG_CONFIG_HOME", "REX_BOT_DIR"]) {

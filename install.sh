@@ -3,8 +3,8 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/smarzban/rex-bot-bridge/main/install.sh | sh
 #
-# Installs the rex-bot CLI with npm (from the npm registry once published, else from GitHub), then
-# offers to run `rex-bot setup`. Re-running it upgrades in place. Never uses sudo, never installs Node.
+# Installs the rex-grokbot CLI with npm (from the npm registry once published, else from GitHub), then
+# offers to run `rex-grokbot setup`. Re-running it upgrades in place. Never uses sudo, never installs Node.
 #
 # Environment:
 #   REX_BOT_SOURCE   npm | github      where to install from (default: npm if published, else github)
@@ -50,7 +50,7 @@ check_tools() {
   if command -v rex >/dev/null 2>&1; then
     say "✅ rex: $(command -v rex)"
   else
-    warn "rex not found on PATH. Install Rex (https://www.superlogical.com/rex/docs) before running rex-bot setup."
+    warn "rex not found on PATH. Install Rex (https://www.superlogical.com/rex/docs) before running rex-grokbot setup."
   fi
   if command -v tailscale >/dev/null 2>&1 || [ -x /Applications/Tailscale.app/Contents/MacOS/Tailscale ]; then
     say "✅ Tailscale found"
@@ -82,7 +82,7 @@ check_prefix() {
     *'***'*)
       shown_prefix=$PREFIX
       PREFIX=$(resolve_redacted_prefix "$shown_prefix") ||
-        die "npm hid part of its global folder path (it printed $shown_prefix), so this installer can't tell where rex-bot will be installed. Nothing was installed. Set NPM_CONFIG_PREFIX to npm's global folder (the one holding bin/ and
+        die "npm hid part of its global folder path (it printed $shown_prefix), so this installer can't tell where rex-grokbot will be installed. Nothing was installed. Set NPM_CONFIG_PREFIX to npm's global folder (the one holding bin/ and
 lib/node_modules) and run again, e.g.:
     curl -fsSL https://raw.githubusercontent.com/$REPO/main/install.sh | NPM_CONFIG_PREFIX=/path/to/prefix sh"
       ;;
@@ -103,7 +103,7 @@ Then run this installer again."
 }
 
 installed_version() {
-  if [ -x "$BIN/rex-bot" ]; then "$BIN/rex-bot" --version 2>/dev/null || true; fi
+  if [ -x "$BIN/rex-grokbot" ]; then "$BIN/rex-grokbot" --version 2>/dev/null || true; fi
 }
 
 choose_spec() {
@@ -126,7 +126,7 @@ choose_spec() {
 # is a plain tarball install. (npm's own `npm i -g github:…` prepares git deps with the global flag still
 # set, which loses the build's devDependencies.) Sets SPEC to the tarball.
 build_from_github() {
-  WORK=$(mktemp -d "${TMPDIR:-/tmp}/rex-bot-install.XXXXXX")
+  WORK=$(mktemp -d "${TMPDIR:-/tmp}/rex-grokbot-install.XXXXXX")
   trap 'rm -rf "$WORK"' EXIT
   say "Downloading $REPO@$REF and building it ..."
   curl -fsSL "https://codeload.github.com/$REPO/tar.gz/$REF" | tar -xzf - -C "$WORK" ||
@@ -146,23 +146,23 @@ build_from_github() {
 }
 
 finish() {
-  if ! command -v rex-bot >/dev/null 2>&1 || [ "$(command -v rex-bot)" != "$BIN/rex-bot" ]; then
-    warn "$BIN is not first on your PATH, so 'rex-bot' may not run the copy just installed. Add it:
+  if ! command -v rex-grokbot >/dev/null 2>&1 || [ "$(command -v rex-grokbot)" != "$BIN/rex-grokbot" ]; then
+    warn "$BIN is not first on your PATH, so 'rex-grokbot' may not run the copy just installed. Add it:
     echo 'export PATH=\"$BIN:\$PATH\"' >> ~/.zshrc && export PATH=\"$BIN:\$PATH\""
   fi
   if [ -t 1 ] && [ -r /dev/tty ]; then
-    printf 'Run rex-bot setup now? [Y/n] '
+    printf 'Run rex-grokbot setup now? [Y/n] '
     answer=""
     read -r answer </dev/tty || answer=n
     case "$answer" in
       "" | y | Y | yes | YES)
-        "$BIN/rex-bot" setup </dev/tty
+        "$BIN/rex-grokbot" setup </dev/tty
         return
         ;;
     esac
   fi
   say ""
-  say "Next: rex-bot setup"
+  say "Next: rex-grokbot setup"
 }
 
 main() {
@@ -181,13 +181,13 @@ main() {
   say "Installing $label into $PREFIX (npm install -g) ..."
   npm install -g --no-fund --no-audit --loglevel=error "$SPEC" >/dev/null || die "npm install -g $label failed (see npm's message above)."
 
-  new=$("$BIN/rex-bot" --version 2>/dev/null) || die "Installed, but $BIN/rex-bot --version doesn't run."
+  new=$("$BIN/rex-grokbot" --version 2>/dev/null) || die "Installed, but $BIN/rex-grokbot --version doesn't run."
   if [ -n "$old" ] && [ "$old" != "$new" ]; then
-    say "✅ Upgraded rex-bot $old → $new ($BIN/rex-bot)"
+    say "✅ Upgraded rex-grokbot $old → $new ($BIN/rex-grokbot)"
   elif [ -n "$old" ]; then
-    say "✅ Reinstalled rex-bot $new ($BIN/rex-bot)"
+    say "✅ Reinstalled rex-grokbot $new ($BIN/rex-grokbot)"
   else
-    say "✅ Installed rex-bot $new ($BIN/rex-bot)"
+    say "✅ Installed rex-grokbot $new ($BIN/rex-grokbot)"
   fi
   finish
 }

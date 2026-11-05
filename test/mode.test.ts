@@ -45,7 +45,7 @@ for (const c of CASES) {
       if (c.unwatched === "refused") {
         assert.equal(other.isError, true, `${c.tool} unwatched should be refused`);
         assert.match(other.text, /"watched" mode/);
-        assert.match(other.text, /rex-bot watch add/);
+        assert.match(other.text, /rex-grokbot watch add/);
       } else {
         assert.equal(other.isError, false, `${c.tool} unwatched: ${other.text}`);
       }

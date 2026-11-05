@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.4.0 — 2026-11-05
+
+The command is now `rex-grokbot`; the connector's endpoint and credential are printed separately; the Grok Bot
+guide is rewritten around who does what and what the bot may trust.
+
+- **Renamed the CLI to `rex-grokbot`.** One bin, `rex-grokbot` (`dist/cli/rex-grokbot.js`); the `rex-bot` and
+  `rex-bot-bridge` bins are gone (no aliases: nothing was published yet). Help, setup/doctor/uninstall output and
+  fix lines, error prefixes, the launchd plists, the Lua watcher and palette actions, `install.sh`, README and
+  docs all use the new name. The npm package and repo stay `rex-bot-bridge`, as do `~/.config/rex-bot-bridge`,
+  the log/state dirs, the `com.rexbotbridge.*` labels, the init.lua markers and the `/rex-bridge` Serve path.
+  Re-run `rex-grokbot setup` after upgrading so the services point at the new entry point.
+- **Agent skill renamed to `rex-grokbot`** (`~/.claude/skills/rex-grokbot`, `~/.agents/skills/rex-grokbot`;
+  `rex-grokbot say` / `rex-grokbot whoami`). Setup and uninstall remove an old `rex-bot` skill only when it
+  carries our `installed-by: rex-bot-bridge` marker.
+- **`rex-grokbot token`** prints the bearer token and nothing else (one line: `rex-grokbot token | pbcopy`);
+  no token yet → "no token yet; run rex-grokbot setup", exit 1. `--rotate` writes a new token, restarts the
+  bridge service if it is loaded (`launchctl kickstart -k`), prints the new token, and reminds you on stderr to
+  update the Grok Bot connector. `--show` is gone.
+- **`rex-grokbot url`** prints only the connector URL, `https://<mac>.<tailnet>.ts.net/rex-bridge/mcp`
+  (exit 1 with a fix line when Tailscale isn't running; a stderr warning when Serve doesn't map it yet).
+- **Removed `rex-grokbot grokbot`** and its paste-this connector message: the instructions live in the guide.
+- **[docs/grok-bot.md](docs/grok-bot.md) rewritten:** a who-does-what table (person on the Mac / person in the
+  Grok Bot app / Grok Bot); Tailscale plugin prerequisites and a `/healthz` reachability check before adding the
+  connector; endpoint and credential entered separately, with honest guidance on entering the token (the app's
+  own secret field if it has one; otherwise a private chat, never echoed; rotate if it leaked); routine
+  instructions that treat every webhook field (including `agent_message` text) and all pane text as untrusted,
+  act only on sessions matching an already-authorized task, never treat an agent's request as permission, and
+  approve permission prompts only when the exact command, directory and effects are visible and in scope (never
+  "always allow"); a Session discovery section; `full` mode moved out of troubleshooting into a Modes section
+  with a clear warning.
+- **Setup no longer warns "Webhook not set yet"** on a fresh install (it is step 2 under Next). Re-runs still
+  show ✅ Webhook configured; doctor still reports the webhook.
+
 ## 0.3.0 — 2026-11-05
 
 Setup v3: no more circular order for new users, a Grok Bot guide, tsk-style help, and a curl installer.

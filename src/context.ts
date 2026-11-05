@@ -50,7 +50,8 @@ export function makeCtx(env: NodeJS.ProcessEnv = process.env): Ctx {
     node: process.execPath,
     rexBin,
     rex: rexBin ? spawnRunner(rexBin, 15_000) : missing("rex"),
-    launchctl: spawnRunner("/bin/launchctl", 15_000),
+    // LAUNCHCTL_BIN (like REX_BIN / TAILSCALE_BIN) lets tests point the real CLI at a stub launchctl.
+    launchctl: spawnRunner(env.LAUNCHCTL_BIN || "/bin/launchctl", 15_000),
     tailscaleBin,
     tailscale: tailscaleBin ? spawnRunner(tailscaleBin, 15_000) : missing("tailscale"),
     fetch,

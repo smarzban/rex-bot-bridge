@@ -24,7 +24,7 @@ export interface Paths {
   launchAgentsDir: string;
   /** v1 opt-in list, imported once by setup. */
   legacyWatchedFile: string;
-  /** Parent dirs that get the rex-bot skill if they exist. */
+  /** Parent dirs that get the rex-grokbot skill if they exist. */
   skillRoots: string[];
 }
 
@@ -61,7 +61,7 @@ export function packageRoot(): string {
 
 /** The built CLI entry point the services and the watcher run. */
 export function cliEntry(root = packageRoot()): string {
-  return join(root, "dist/cli/rex-bot.js");
+  return join(root, "dist/cli/rex-grokbot.js");
 }
 
 /** Like `command -v`: the first executable named `name` on PATH, or null. */
