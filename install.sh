@@ -63,8 +63,9 @@ check_tools() {
 check_prefix() {
   PREFIX=$(npm prefix -g 2>/dev/null) || die "Could not read npm's global prefix (npm prefix -g)."
   BIN="$PREFIX/bin"
+  # The nearest folder that exists: npm creates the rest, so that's the one that must be writable.
   target="$PREFIX/lib/node_modules"
-  [ -d "$target" ] || target="$PREFIX"
+  while [ ! -d "$target" ] && [ "$target" != "/" ]; do target=$(dirname "$target"); done
   if [ ! -w "$target" ]; then
     die "npm's global folder $target is not writable by you, and this installer never uses sudo. Either:
   - use Homebrew's Node (its prefix is yours):  brew install node
