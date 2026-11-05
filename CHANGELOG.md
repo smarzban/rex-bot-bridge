@@ -12,9 +12,11 @@ and tried to sign in there. Sharing an origin was the root cause.
 - **Own port.** `rex-grokbot setup serve` now runs `tailscale serve --bg --https=8443 http://127.0.0.1:7400` (the
   whole port, no `--set-path`). The connector URL is `https://<mac>.<tailnet>.ts.net:8443/mcp`; healthz is
   `…:8443/healthz`. New setting `servePort` (default 8443; 1-65535, not 443): `rex-grokbot config set servePort
-  <port>`. Tailscale Serve accepts any HTTPS port (Funnel would limit it to 443/8443/10000; we never use Funnel).
-- **A port already in use is never replaced without asking** (any handler on it, several paths, or a TCP
-  forward): default no, `--yes` never replaces. An explicit yes clears the port, then maps it.
+  <port>`. 8443 is the default (10000 is the other common choice); these are also Funnel's ports (443/8443/10000),
+  but the bridge never enables Funnel.
+- **A port already in use is never replaced without asking.** Another app at `/` on the port: asks, default no,
+  `--yes` never replaces; an explicit yes replaces only `/`. Several paths, a TCP forward or plain HTTP on the
+  port: not offered at all; the fix line says to pick another `servePort`.
 - **Migration from 0.4.** If our old `/rex-bridge` path on port 443 is still there (and proxies to this bridge),
   setup offers (default yes) to remove it once `https://<mac>:8443/healthz` answers, and says to update the
   connector URL. Only that path is removed (`tailscale serve --https=443 --set-path /rex-bridge off`); `/` and

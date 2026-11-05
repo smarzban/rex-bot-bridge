@@ -237,9 +237,10 @@ test("K2: portTarget is tri-state: absent / occupied (any handler) / unknown", a
   assert.deepEqual(await portTarget(r(status({ Proxy: "http://127.0.0.1:7400/" })), 8443), {
     kind: "occupied",
     target: "http://127.0.0.1:7400",
+    root: true,
   });
-  assert.deepEqual(await portTarget(r(status({ Path: "/srv/www" })), 8443), { kind: "occupied", target: "files at /srv/www" });
-  assert.deepEqual(await portTarget(r(status({ Text: "hi" })), 8443), { kind: "occupied", target: "a static text response" });
+  assert.deepEqual(await portTarget(r(status({ Path: "/srv/www" })), 8443), { kind: "occupied", target: "files at /srv/www", root: true });
+  assert.deepEqual(await portTarget(r(status({ Text: "hi" })), 8443), { kind: "occupied", target: "a static text response", root: true });
   assert.equal((await portTarget(r(status({ Redirect: "x" })), 8443)).kind, "occupied");
   assert.equal((await portTarget(r({ stdout: "", stderr: "boom", code: 1 }), 8443)).kind, "unknown");
   assert.equal((await portTarget(r(ok("not json")), 8443)).kind, "unknown");
@@ -278,7 +279,7 @@ for (const [name, st] of [
 
     // An explicit yes does replace it.
     const e = await fakeCtx(st);
-    await setup(e.ctx, { ...FLAGS }, scriptedPrompter({ "Replace everything": true, anyway: true }));
+    await setup(e.ctx, { ...FLAGS }, scriptedPrompter({ "Replace it": true, anyway: true }));
     assert.equal(e.tsCalls.filter(isServeRun).length, 1);
   });
 }

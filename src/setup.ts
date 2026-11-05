@@ -17,7 +17,6 @@ import {
   legacyUrl,
   portTarget,
   serveArgs,
-  serveOffArgs,
   servesDesired,
   shellCommand,
   tailscaleStatus,
@@ -269,10 +268,15 @@ async function serveSection(ctx: Ctx, out: Printer, s: Settings, p: Prompter): P
     out.ok(`Already maps ${origin} → ${desired}`);
   } else {
     let run: boolean;
-    if (current.kind === "occupied") {
-      // Never overwritten by default (so --yes leaves it alone).
-      out.warn(`Tailscale Serve port ${s.servePort} is already in use: ${current.target}.`, `pick another port: rex-grokbot config set servePort <port>, then: rex-grokbot setup serve`);
-      run = await p.confirm(`Replace everything on port ${s.servePort} with ${desired}?`, false);
+    const pickPort = `pick another port: rex-grokbot config set servePort <port>, then: rex-grokbot setup serve`;
+    if (current.kind === "occupied" && current.root) {
+      // A single `/` handler: our command replaces exactly that. Never by default (so --yes leaves it alone).
+      out.warn(`Tailscale Serve port ${s.servePort} is already in use: ${origin}/ → ${current.target}.`, pickPort);
+      run = await p.confirm(`Replace it with ${desired}?`, false);
+    } else if (current.kind === "occupied") {
+      // Several paths, a TCP forward, plain HTTP: one command can't cleanly take the port over, so don't offer to.
+      out.warn(`Tailscale Serve port ${s.servePort} is already in use: ${current.target}. Setup won't change it.`, pickPort);
+      return false;
     } else if (current.kind === "unknown") {
       out.warn(`Could not read Tailscale Serve's current config (${current.reason}), so setup can't tell whether port ${s.servePort} is in use.`);
       run = await p.confirm(`Run \`${cmd}\` anyway (it replaces anything at ${origin}/)?`, false);
@@ -283,14 +287,6 @@ async function serveSection(ctx: Ctx, out: Printer, s: Settings, p: Prompter): P
     if (!run) {
       out.warn("Tailscale Serve not changed.", cmd);
       return false;
-    }
-    // Replacing an occupied port: clear it first, or other paths on it would stay beside our `/`.
-    if (current.kind === "occupied") {
-      const off = await ctx.tailscale(serveOffArgs(s.servePort));
-      if (off.code !== 0) {
-        out.fail(`tailscale serve off failed: ${(off.stderr || off.stdout).trim()}`, shellCommand("tailscale", serveOffArgs(s.servePort)));
-        return false;
-      }
     }
     const r = await ctx.tailscale(serveArgs(s.servePort, s.port));
     if (r.code !== 0) {

@@ -102,29 +102,42 @@ test("T431 setup serve: our port mapping already there → nothing asked, nothin
   assert.match(f.out.join("\n"), /Already maps https:\/\/mac\.tail\.ts\.net:8443 → http:\/\/127\.0\.0\.1:7400/);
 });
 
+test("T431 setup serve: another app at / on 8443 → asks (default no); --yes refuses; an explicit yes replaces only /", async () => {
+  const st = serveStatus(null, { "/": T3 });
+  const f = await fakeCtx(st);
+  const p = scriptedPrompter();
+  await setup(f.ctx, FLAGS, p, "serve");
+  assert.equal(p.asked.length, 1, JSON.stringify(p.asked));
+  assert.equal(p.asked[0]!.def, false);
+  assert.match(p.asked[0]!.q, /Replace it with http:\/\/127\.0\.0\.1:7400/);
+  assert.deepEqual(changes(f.tsCalls), [], "interactive default is no");
+  assert.match(f.out.join("\n"), /port 8443 is already in use: https:\/\/mac\.tail\.ts\.net:8443\/ → http:\/\/127\.0\.0\.1:3773[\s\S]*fix: pick another port: rex-grokbot config set servePort <port>/);
+
+  const y = await fakeCtx(st);
+  await setup(y.ctx, { ...FLAGS, yes: true }, makePrompter(true), "serve");
+  assert.deepEqual(changes(y.tsCalls), [], "--yes never replaces");
+
+  const e = await fakeCtx(st);
+  await setup(e.ctx, FLAGS, scriptedPrompter({ "Replace it": true }), "serve");
+  assert.deepEqual(changes(e.tsCalls), [MAP], "the mapping command replaces `/`; nothing is turned off");
+});
+
 for (const [name, st] of [
-  ["another app's proxy on 8443", serveStatus(null, { "/": T3 })],
   ["our / plus another path on 8443", serveStatus(null, { "/": OURS, "/other": T3 })],
   ["another app's path only on 8443", serveStatus(null, { "/app": T3 })],
   ["a raw TCP forward on 8443", serveStatus(null, null, { "8443": { TCPForward: "127.0.0.1:22" } })],
+  ["our target over plain HTTP on 8443", ok(JSON.stringify({ TCP: { "8443": { HTTP: true } }, Web: { "mac.tail.ts.net:8443": { Handlers: { "/": OURS } } } }))],
 ] as [string, RunResult][]) {
-  test(`T431 setup serve: ${name} → asks (default no); --yes refuses; an explicit yes clears the port first`, async () => {
-    const f = await fakeCtx(st);
-    const p = scriptedPrompter();
-    await setup(f.ctx, FLAGS, p, "serve");
-    assert.equal(p.asked.length, 1, JSON.stringify(p.asked));
-    assert.equal(p.asked[0]!.def, false);
-    assert.match(p.asked[0]!.q, /Replace everything on port 8443/);
-    assert.deepEqual(changes(f.tsCalls), [], "interactive default is no");
-    assert.match(f.out.join("\n"), /port 8443 is already in use[\s\S]*fix: pick another port: rex-grokbot config set servePort <port>/);
-
-    const y = await fakeCtx(st);
-    await setup(y.ctx, { ...FLAGS, yes: true }, makePrompter(true), "serve");
-    assert.deepEqual(changes(y.tsCalls), [], "--yes never replaces");
-
-    const e = await fakeCtx(st);
-    await setup(e.ctx, FLAGS, scriptedPrompter({ "Replace everything": true }), "serve");
-    assert.deepEqual(changes(e.tsCalls), [PORT_OFF, MAP]);
+  test(`T431 setup serve: ${name} → not offered at all (interactive or --yes); points at another servePort`, async () => {
+    for (const [flags, p] of [
+      [FLAGS, scriptedPrompter({ "Replace it": true, anyway: true })],
+      [{ ...FLAGS, yes: true }, makePrompter(true)],
+    ] as [SetupFlags, Prompter][]) {
+      const f = await fakeCtx(st);
+      assert.equal(await setup(f.ctx, flags, p, "serve"), 0);
+      assert.deepEqual(changes(f.tsCalls), []);
+      assert.match(f.out.join("\n"), /port 8443 is already in use: .*Setup won't change it\.\n {6}fix: pick another port: rex-grokbot config set servePort <port>/);
+    }
   });
 }
 

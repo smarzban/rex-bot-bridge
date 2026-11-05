@@ -24,8 +24,8 @@ export async function tailscaleStatus(ts: Runner): Promise<TailscaleStatus> {
 
 /**
  * The bridge gets a whole tailnet HTTPS port (its own origin), never a path on :443: an origin shared with
- * other apps lets their `/.well-known/oauth-*` metadata hijack the connector's auth. Tailscale Serve accepts any
- * port for HTTPS; 8443 is the default (Funnel would restrict ports to 443/8443/10000, but we never use Funnel).
+ * other apps lets their `/.well-known/oauth-*` metadata hijack the connector's auth. `--https=<port>` takes a port;
+ * 8443 is the default (10000 is the other common one). Those are also Funnel's ports, but we never use Funnel.
  */
 export function serveArgs(servePort: number, port: number): string[] {
   return ["serve", "--bg", `--https=${servePort}`, `http://127.0.0.1:${port}`];
@@ -55,7 +55,7 @@ export function shellCommand(bin: string, args: string[]): string {
  */
 export type ServeTarget =
   | { kind: "absent" }
-  | { kind: "occupied"; target: string }
+  | { kind: "occupied"; target: string; /** a single HTTPS `/` handler: `serve --https=<port> <target>` replaces it */ root?: boolean }
   | { kind: "unknown"; reason: string };
 
 interface ServeHandler {
@@ -117,7 +117,11 @@ export async function portTarget(ts: Runner, servePort: number): Promise<ServeTa
     if (tcp && typeof tcp === "object" && !tcp.HTTPS && Object.keys(tcp).length) return { kind: "occupied", target: "a non-HTTPS listener" };
     return { kind: "absent" };
   }
-  if (handlers.length === 1 && handlers[0]![0] === "/") return { kind: "occupied", target: describeHandler(handlers[0]![1]) };
+  if (handlers.length === 1 && handlers[0]![0] === "/") {
+    const target = describeHandler(handlers[0]![1]);
+    if (tcp && typeof tcp === "object" && tcp.HTTP && !tcp.HTTPS) return { kind: "occupied", target: `${target} (plain HTTP)` };
+    return { kind: "occupied", target, root: true };
+  }
   return { kind: "occupied", target: handlers.map(([path, h]) => `${path} → ${describeHandler(h)}`).join(", ") };
 }
 
