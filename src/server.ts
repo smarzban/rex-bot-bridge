@@ -19,7 +19,9 @@ function sendJson(res: ServerResponse, status: number, body: unknown, headers: R
 
 /**
  * HTTP front: GET /healthz (no auth), POST/GET/DELETE /mcp (bearer auth, stateless Streamable HTTP).
- * Paths are matched by suffix so the bridge also works behind `tailscale serve --set-path /rex-bridge`.
+ * Paths are matched by suffix so the bridge also works behind the legacy `tailscale serve --set-path /rex-bridge`.
+ * Every `/.well-known/*` path is a plain 404: the bridge has no OAuth, and MCP clients that get our 401 probe
+ * `/.well-known/oauth-protected-resource[/mcp]` and `/.well-known/oauth-authorization-server` to find one.
  */
 export function createBridgeHttpServer(opts: HttpOptions): Server {
   const server = createServer(async (req, res) => {
@@ -40,6 +42,12 @@ export function createBridgeHttpServer(opts: HttpOptions): Server {
 async function handle(req: IncomingMessage, res: ServerResponse, opts: HttpOptions) {
   const path = new URL(req.url ?? "/", "http://localhost").pathname.replace(/\/+$/, "");
 
+  // Before the suffix matches: /.well-known/oauth-protected-resource/mcp ends with /mcp.
+  if (isWellKnown(path)) {
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
+
   if (path.endsWith("/healthz") && req.method === "GET") {
     const [rex_reachable, watcher_heartbeat_age_s] = await Promise.all([
       opts.ops.rexReachable(),
@@ -57,6 +65,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, opts: HttpOptio
   const expected = await opts.getToken();
   const presented = bearer(req.headers.authorization);
   if (!expected || !presented || !tokenMatches(presented, expected)) {
+    // RFC 7235 wants a challenge on 401. No resource_metadata: there is no OAuth here, only a static token.
     sendJson(res, 401, { error: "unauthorized" }, { "www-authenticate": 'Bearer realm="rex-bot-bridge"' });
     return;
   }
@@ -75,4 +84,9 @@ async function handle(req: IncomingMessage, res: ServerResponse, opts: HttpOptio
   });
   await mcp.connect(transport);
   await transport.handleRequest(req, res);
+}
+
+/** True for any path with a `.well-known` segment (`/.well-known/…`, or `/rex-bridge/.well-known/…`). */
+export function isWellKnown(path: string): boolean {
+  return path.split("/").includes(".well-known");
 }
