@@ -162,6 +162,29 @@ try {
     health = await fetch(`http://127.0.0.1:${PORT}/healthz`).then((r) => r.json()).catch(() => null);
   }
   check(health?.ok === true && health.rex_reachable === true, `bridge /healthz on ${PORT}: ${JSON.stringify(health)}`);
+
+  // T431: no OAuth discovery on the bridge's origin; /mcp is a plain bearer check.
+  const B = `http://127.0.0.1:${PORT}`;
+  for (const path of ["/.well-known/oauth-authorization-server", "/.well-known/oauth-protected-resource/mcp", "/.well-known/oauth-protected-resource", "/.well-known/openid-configuration"]) {
+    const r = await fetch(B + path);
+    const body = await r.text();
+    check(r.status === 404 && body === '{"error":"not found"}' && !r.headers.get("www-authenticate"), `GET ${path} → ${r.status} ${body}`);
+  }
+  const initBody = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "e2e", version: "0" } } });
+  const mcpPost = (auth) =>
+    fetch(`${B}/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json, text/event-stream", ...(auth ? { authorization: auth } : {}) },
+      body: initBody,
+    });
+  const noTok = await mcpPost();
+  check(noTok.status === 401 && noTok.headers.get("www-authenticate") === 'Bearer realm="rex-bot-bridge"', `POST /mcp without a token → ${noTok.status} (WWW-Authenticate: ${noTok.headers.get("www-authenticate")})`);
+  check((await mcpPost("Bearer wrong-token")).status === 401, "POST /mcp with a wrong token → 401");
+  const withTok = await mcpPost(`Bearer ${token}`);
+  check(withTok.status === 200, `POST /mcp with the sandbox token → ${withTok.status}`);
+  const sp443 = await cli(["config", "set", "servePort", "443"]);
+  check(sp443.code === 1 && /own origin/.test(sp443.stderr), `config set servePort 443 refused: ${sp443.stderr.trim()}`);
+  check((await cli(["config", "get", "servePort"])).stdout.trim() === "8443", "servePort defaults to 8443");
   let hb = null;
   for (let i = 0; i < 40 && !hb; i++) {
     await sleep(250);
