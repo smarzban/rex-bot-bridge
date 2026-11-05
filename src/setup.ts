@@ -68,20 +68,26 @@ export async function migrateWatched(legacyFile: string, watchedFile: string): P
 
 /** Strips a leading `Bearer ` from a key value. */
 function stripBearer(v: string): string {
-  return v.trim().replace(/^bearer\s+/i, "").trim();
+  return v.trim().replace(/^bearer(\s+|$)/i, "").trim();
 }
 
 const HEADER_NAME = /^[A-Za-z0-9-]+$/;
 
 /**
- * Reads the (hidden) key answer. A pasted header line `Name: value` (a space after the colon, so a
- * bare key like `abc:def` stays a key) gives the header name and the key; a leading `Bearer ` is
- * stripped either way.
+ * Reads the (hidden) key answer. A pasted header line gives the header name and the key; a leading
+ * `Bearer ` is stripped either way. It counts as a header line when there's a space after the colon
+ * (`X-Key: v`), the name is Authorization (`Authorization:Bearer v`), or nothing follows the colon
+ * (`X-Key:`, which is an error: no key). Otherwise, e.g. a bare `abc:def`, it's the key as typed.
  */
-export function parseKeyAnswer(a: string): { key: string; header?: string } {
-  const m = /^([A-Za-z0-9-]+):\s+(.*)$/.exec(a.trim());
-  if (m) return { header: m[1]!, key: stripBearer(m[2]!) };
-  return { key: stripBearer(a) };
+export function parseKeyAnswer(a: string): { key: string; header?: string } | { error: string } {
+  const t = a.trim();
+  const m = /^([A-Za-z0-9-]+):(\s*)(.*)$/.exec(t);
+  if (m && (m[2] || !m[3] || m[1]!.toLowerCase() === "authorization")) {
+    const key = stripBearer(m[3]!);
+    if (!key) return { error: "That header line has no key after the colon." };
+    return { header: m[1]!, key };
+  }
+  return { key: stripBearer(t) };
 }
 
 /**
@@ -137,7 +143,23 @@ async function askWebhook(s: Settings, p: Prompter, say: (s: string) => void, wa
   if (!url) return s;
   s = setKey(s, "webhook.url", url);
 
-  const k = parseKeyAnswer(await p.ask(KEY_QUESTION, { secret: true }));
+  let k: { key: string; header?: string } | undefined;
+  const keyAnswer = await askValid(
+    p,
+    KEY_QUESTION,
+    (a) => {
+      const r = parseKeyAnswer(a);
+      if ("error" in r) return r.error;
+      k = r;
+      return undefined;
+    },
+    say,
+    { secret: true },
+  );
+  if (keyAnswer === undefined || !k) {
+    warn(`No valid webhook key after ${MAX_TRIES} tries; saved the URL without a key. Add it later: rex-bot config set webhook.key -`);
+    return s;
+  }
   if (!k.key) return s;
   let key = k.key;
   let header = k.header;

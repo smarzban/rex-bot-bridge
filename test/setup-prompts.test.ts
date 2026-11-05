@@ -47,6 +47,47 @@ test("T428 parse: key answers lose Bearer, and any pasted `Name: value` line giv
   assert.deepEqual(parseKeyAnswer("abc:def"), { key: "abc:def" });
 });
 
+test("T428 R1 parse: `Authorization:` with no space is still a header line; a bare `abc:def` stays a key", () => {
+  assert.deepEqual(parseKeyAnswer("Authorization:Bearer x"), { header: "Authorization", key: "x" });
+  assert.deepEqual(parseKeyAnswer("authorization:x"), { header: "authorization", key: "x" });
+  assert.deepEqual(parseKeyAnswer("abc:def"), { key: "abc:def" });
+  assert.deepEqual(parseKeyAnswer("X-Key:abc"), { key: "X-Key:abc" }, "no-space form is only special for Authorization");
+});
+
+test("T428 R2 parse: a header line with an empty value is an error, not a key", () => {
+  for (const a of ["X-Key: ", "X-Key:", "Authorization: Bearer ", "Authorization:"]) assert.ok("error" in parseKeyAnswer(a), a);
+});
+
+test("T428 R1 setup: `Authorization:Bearer x` in the key answer → header Authorization, key x", async () => {
+  const f = await fakeCtx({ stdout: "{}", stderr: "", code: 0 });
+  const p = scriptedPrompter({ [URL_Q]: URL, [KEY_Q]: "Authorization:Bearer x-secret-1" });
+  await setup(f.ctx, { ...FLAGS }, p);
+  const s = await readSettings(f.ctx.paths.configFile);
+  assert.deepEqual([s.webhook.header, s.webhook.key], [undefined, "x-secret-1"]);
+  assert.ok(!p.asked.some((a) => a.q === HEADER_QUESTION), "header came from the key answer");
+  assertNoSecrets(f.out.join("\n"), "x-secret-1");
+});
+
+test("T428 R2 setup: `X-Key: ` is re-asked with the reason, then a good answer is used", async () => {
+  const f = await fakeCtx({ stdout: "{}", stderr: "", code: 0 });
+  const p = scriptedPrompter({ [URL_Q]: URL, [KEY_Q]: ["X-Key: ", "X-Key: k-secret-2"] });
+  await setup(f.ctx, { ...FLAGS }, p);
+  const s = await readSettings(f.ctx.paths.configFile);
+  assert.deepEqual([s.webhook.header, s.webhook.key], ["X-Key", "k-secret-2"]);
+  assert.equal(p.asked.filter((a) => a.q === KEY_QUESTION).length, 2);
+  assert.match(f.out.join("\n"), /no key after the colon\. Try again\./);
+});
+
+test("T428 R2 setup: three empty header lines skip the key, keep the URL, and setup completes", async () => {
+  const r = await run({ [URL_Q]: URL, [KEY_Q]: "X-Key: " });
+  assert.equal(r.code, 0);
+  assert.equal(r.s.webhook.url, URL);
+  assert.equal(r.s.webhook.key, undefined);
+  assert.equal(r.s.webhook.header, undefined);
+  assert.match(r.out, /No valid webhook key after 3 tries/);
+  assert.ok(r.out.includes("Grok Bot"), "setup ran to the end");
+});
+
 test("T428 parse: header answers accept a name or a pasted full header line", () => {
   assert.deepEqual(parseHeaderAnswer("", "k"), { header: "Authorization", key: "k" });
   assert.deepEqual(parseHeaderAnswer("X-Webhook-Key", "k"), { header: "X-Webhook-Key", key: "k" });
