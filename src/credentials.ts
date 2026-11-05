@@ -3,7 +3,7 @@
 import type { Ctx } from "./context.js";
 import { domain, LABELS, serviceState } from "./launchd.js";
 import { ensurePrivateDir, readSettings } from "./settings.js";
-import { bridgeUrl, servesDesired, serveTarget, tailscaleStatus } from "./tailscale.js";
+import { bridgeOrigin, portTarget, servesDesired, tailscaleStatus } from "./tailscale.js";
 import { ensureToken, readToken } from "./token.js";
 
 /**
@@ -35,7 +35,7 @@ export async function tokenCommand(ctx: Ctx, rotate: boolean): Promise<number> {
   return 0;
 }
 
-/** Prints only the connector URL, https://<mac>.<tailnet>.ts.net/rex-bridge/mcp. */
+/** Prints only the connector URL, https://<mac>.<tailnet>.ts.net:8443/mcp (the bridge's own origin). */
 export async function urlCommand(ctx: Ctx): Promise<number> {
   const s = await readSettings(ctx.paths.configFile);
   const ts = ctx.tailscaleBin ? await tailscaleStatus(ctx.tailscale) : { running: false, dnsName: undefined };
@@ -46,12 +46,12 @@ export async function urlCommand(ctx: Ctx): Promise<number> {
     );
     return 1;
   }
-  const target = await serveTarget(ctx.tailscale, s.servePath);
+  const target = await portTarget(ctx.tailscale, s.servePort);
   if (target.kind === "unknown") {
-    ctx.err(`rex-grokbot: warning: couldn't confirm that Tailscale Serve maps ${s.servePath} to the bridge (${target.reason}).\n  fix: rex-grokbot doctor`);
+    ctx.err(`rex-grokbot: warning: couldn't confirm that Tailscale Serve maps port ${s.servePort} to the bridge (${target.reason}).\n  fix: rex-grokbot doctor`);
   } else if (!servesDesired(target, `http://127.0.0.1:${s.port}`)) {
-    ctx.err(`rex-grokbot: warning: Tailscale Serve doesn't map ${s.servePath} to the bridge yet.\n  fix: rex-grokbot setup serve`);
+    ctx.err(`rex-grokbot: warning: Tailscale Serve doesn't map port ${s.servePort} to the bridge yet.\n  fix: rex-grokbot setup serve`);
   }
-  ctx.out(`${bridgeUrl(ts.dnsName, s.servePath)}/mcp`);
+  ctx.out(`${bridgeOrigin(ts.dnsName, s.servePort)}/mcp`);
   return 0;
 }

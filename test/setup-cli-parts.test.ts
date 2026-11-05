@@ -74,7 +74,7 @@ test("T429 FR1-D cli: setup serve runs only tailscale serve", async () => {
   assert.equal(r.status, 0, r.stderr + r.stdout);
   const st = await sb.state();
   assert.deepEqual([st.skill, st.init], [false, "-- mine\n"]);
-  assert.ok(st.calls.includes("tailscale serve --bg --https=443 --set-path /rex-bridge http://127.0.0.1:7400"), st.calls.join("\n"));
+  assert.ok(st.calls.includes("tailscale serve --bg --https=8443 http://127.0.0.1:7400"), st.calls.join("\n"));
   assert.ok(!st.calls.some((c) => c.startsWith("rex ")), "no rex calls");
 });
 

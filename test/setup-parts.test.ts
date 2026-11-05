@@ -43,7 +43,7 @@ async function partRun(part: Part) {
   const code = await setup(f.ctx, { ...ALL }, makePrompter(true), part);
   const init = await readFile(f.ctx.paths.rexInitLua, "utf8");
   const skill = existsSync(`${f.ctx.paths.skillRoots[0]}/skills/rex-grokbot/SKILL.md`);
-  const serveRuns = f.tsCalls.filter((a) => a[0] === "serve" && a.includes("--set-path")).length;
+  const serveRuns = f.tsCalls.filter((a) => a[0] === "serve" && a.includes("--bg")).length;
   const bootstraps = calls.filter((c) => c[0] === "bootstrap").length;
   return { code, out: f.out.join("\n"), init, skill, serveRuns, bootstraps, f };
 }

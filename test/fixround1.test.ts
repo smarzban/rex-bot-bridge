@@ -14,7 +14,7 @@ import { installBlock, uninstallBlock, renderBlock } from "../src/rexconfig.js";
 import { buildServeOps } from "../src/serve.js";
 import { writeSettings, DEFAULTS, type Mode } from "../src/settings.js";
 import { setup, type SetupFlags } from "../src/setup.js";
-import { serveTarget } from "../src/tailscale.js";
+import { portTarget } from "../src/tailscale.js";
 import { ensureToken } from "../src/token.js";
 import { uninstall } from "../src/uninstall.js";
 import { runDoctor } from "../src/doctor.js";
@@ -221,28 +221,29 @@ function recording(p: Prompter) {
   return { p: wrapped, asked };
 }
 
-const status = (handler: unknown) => ok(JSON.stringify({ Web: { "mac.tail.ts.net:443": { Handlers: { "/rex-bridge": handler } } } }));
-const isServeRun = (a: string[]) => a[0] === "serve" && a.includes("--set-path") && !a.includes("off");
+// The bridge's own port (8443) holding `handler` at `/`.
+const status = (handler: unknown) => ok(JSON.stringify({ Web: { "mac.tail.ts.net:8443": { Handlers: { "/": handler } } } }));
+const isServeRun = (a: string[]) => a[0] === "serve" && a.includes("--bg") && !a.includes("off");
 const isServeOff = (a: string[]) => a[0] === "serve" && a.includes("off");
 
-test("K2: serveTarget is tri-state: absent / occupied (any handler) / unknown", async () => {
+test("K2: portTarget is tri-state: absent / occupied (any handler) / unknown", async () => {
   const r = (res: RunResult | Error): Runner => async () => {
     if (res instanceof Error) throw res;
     return res;
   };
-  assert.deepEqual(await serveTarget(r(ok("{}")), "/rex-bridge"), { kind: "absent" });
-  assert.deepEqual(await serveTarget(r(ok("")), "/rex-bridge"), { kind: "absent" });
-  assert.deepEqual(await serveTarget(r(status({ Proxy: "http://127.0.0.1:7400/" })), "/other"), { kind: "absent" });
-  assert.deepEqual(await serveTarget(r(status({ Proxy: "http://127.0.0.1:7400/" })), "/rex-bridge"), {
+  assert.deepEqual(await portTarget(r(ok("{}")), 8443), { kind: "absent" });
+  assert.deepEqual(await portTarget(r(ok("")), 8443), { kind: "absent" });
+  assert.deepEqual(await portTarget(r(status({ Proxy: "http://127.0.0.1:7400/" })), 9443), { kind: "absent" });
+  assert.deepEqual(await portTarget(r(status({ Proxy: "http://127.0.0.1:7400/" })), 8443), {
     kind: "occupied",
     target: "http://127.0.0.1:7400",
   });
-  assert.deepEqual(await serveTarget(r(status({ Path: "/srv/www" })), "/rex-bridge"), { kind: "occupied", target: "files at /srv/www" });
-  assert.deepEqual(await serveTarget(r(status({ Text: "hi" })), "/rex-bridge"), { kind: "occupied", target: "a static text response" });
-  assert.equal((await serveTarget(r(status({ Redirect: "x" })), "/rex-bridge")).kind, "occupied");
-  assert.equal((await serveTarget(r({ stdout: "", stderr: "boom", code: 1 }), "/rex-bridge")).kind, "unknown");
-  assert.equal((await serveTarget(r(ok("not json")), "/rex-bridge")).kind, "unknown");
-  assert.equal((await serveTarget(r(new Error("spawn ENOENT")), "/rex-bridge")).kind, "unknown");
+  assert.deepEqual(await portTarget(r(status({ Path: "/srv/www" })), 8443), { kind: "occupied", target: "files at /srv/www" });
+  assert.deepEqual(await portTarget(r(status({ Text: "hi" })), 8443), { kind: "occupied", target: "a static text response" });
+  assert.equal((await portTarget(r(status({ Redirect: "x" })), 8443)).kind, "occupied");
+  assert.equal((await portTarget(r({ stdout: "", stderr: "boom", code: 1 }), 8443)).kind, "unknown");
+  assert.equal((await portTarget(r(ok("not json")), 8443)).kind, "unknown");
+  assert.equal((await portTarget(r(new Error("spawn ENOENT")), 8443)).kind, "unknown");
 });
 
 test("K2 setup: an absent mapping is offered with default yes and applied", async () => {
@@ -277,7 +278,7 @@ for (const [name, st] of [
 
     // An explicit yes does replace it.
     const e = await fakeCtx(st);
-    await setup(e.ctx, { ...FLAGS }, scriptedPrompter({ "Replace it": true, anyway: true }));
+    await setup(e.ctx, { ...FLAGS }, scriptedPrompter({ "Replace everything": true, anyway: true }));
     assert.equal(e.tsCalls.filter(isServeRun).length, 1);
   });
 }

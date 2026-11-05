@@ -4,14 +4,14 @@ import { isSandboxHome, type Ctx } from "./context.js";
 import { uninstallServices } from "./launchd.js";
 import type { Prompter } from "./prompt.js";
 import { migrateBackups, uninstallBlock } from "./rexconfig.js";
-import { readSettings } from "./settings.js";
+import { legacyServePath, readSettings } from "./settings.js";
 import { uninstallSkills } from "./skills.js";
-import { serveOffArgs, servesDesired, serveTarget, shellCommand } from "./tailscale.js";
+import { legacyPathTarget, legacyServeOffArgs, portTarget, serveOffArgs, servesDesired, shellCommand } from "./tailscale.js";
 
 export interface UninstallFlags {
   yes: boolean;
   purge: boolean;
-  /** Also remove the Tailscale Serve mapping (asked interactively; with --yes only when this flag is set). */
+  /** Also remove our Tailscale Serve mappings (asked interactively; with --yes only when this flag is set). */
   serveOff: boolean;
 }
 
@@ -49,20 +49,27 @@ export async function uninstall(ctx: Ctx, flags: UninstallFlags, p: Prompter): P
   const skills = await uninstallSkills(paths.skillRoots);
   ok(skills.length ? `Removed agent skill: ${skills.join(", ")}` : "No agent skill installed");
 
+  // Our port mapping, and the ≤ 0.4 path on :443 if it is still there. Only our own mappings are ever offered
+  // for removal; a foreign or unreadable one (and `/` on :443) is left alone.
   const desired = `http://127.0.0.1:${s.port}`;
-  const target = ctx.tailscaleBin ? await serveTarget(ctx.tailscale, s.servePath) : null;
-  // Only our own mapping is ever offered for removal; a foreign or unreadable one is left alone.
-  if (target && servesDesired(target, desired)) {
-    const cmd = shellCommand("tailscale", serveOffArgs(s.servePath));
-    const off = flags.serveOff || (p.interactive && (await p.confirm(`Remove the Tailscale Serve mapping ${s.servePath}?`, false)));
+  const path = legacyServePath(s);
+  const mappings = ctx.tailscaleBin
+    ? [
+        { what: `port ${s.servePort}`, ours: servesDesired(await portTarget(ctx.tailscale, s.servePort), desired), args: serveOffArgs(s.servePort) },
+        { what: `${path} on port 443 (0.4 and earlier)`, ours: servesDesired(await legacyPathTarget(ctx.tailscale, path), desired), args: legacyServeOffArgs(path) },
+      ].filter((m) => m.ours)
+    : [];
+  for (const m of mappings) {
+    const cmd = shellCommand("tailscale", m.args);
+    const off = flags.serveOff || (p.interactive && (await p.confirm(`Remove the Tailscale Serve mapping ${m.what}?`, false)));
     if (off) {
-      const t = await ctx.tailscale(serveOffArgs(s.servePath));
-      if (t.code === 0) ok(`Tailscale Serve ${s.servePath} removed`);
+      const t = await ctx.tailscale(m.args);
+      if (t.code === 0) ok(`Tailscale Serve ${m.what} removed`);
       else {
         failed = true;
         ctx.err(`❌ ${cmd} failed: ${(t.stderr || t.stdout).trim()}`);
       }
-    } else ctx.out(`   Tailscale Serve ${s.servePath} left in place. Remove it with: ${cmd}`);
+    } else ctx.out(`   Tailscale Serve ${m.what} left in place. Remove it with: ${cmd}`);
   }
 
   if (flags.purge) {

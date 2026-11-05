@@ -7,9 +7,21 @@ import { DOC_RAW_URL, DOC_URL } from "./grokbot.js";
 import { bootstrapCommand, installServices, LEGACY_LABELS, serviceState } from "./launchd.js";
 import type { Prompter } from "./prompt.js";
 import { installBlock, migrateBackups } from "./rexconfig.js";
-import { ensurePrivateDir, MODES, readSettings, settingsExist, writeSettings, type Mode, type Settings } from "./settings.js";
+import { getJson } from "./doctor.js";
+import { ensurePrivateDir, legacyServePath, MODES, readSettings, settingsExist, writeSettings, type Mode, type Settings } from "./settings.js";
 import { installSkills } from "./skills.js";
-import { serveArgs, servesDesired, serveTarget, shellCommand, tailscaleStatus } from "./tailscale.js";
+import {
+  bridgeOrigin,
+  legacyPathTarget,
+  legacyServeOffArgs,
+  legacyUrl,
+  portTarget,
+  serveArgs,
+  serveOffArgs,
+  servesDesired,
+  shellCommand,
+  tailscaleStatus,
+} from "./tailscale.js";
 import { ensureToken } from "./token.js";
 import { parseWatched, WatchFile } from "./watch.js";
 
@@ -242,43 +254,82 @@ async function servicesSection(ctx: Ctx, out: Printer, s: Settings, p: Prompter)
   return results.every((r) => r.ok);
 }
 
-/** Returns true when the mapping is in place afterwards. */
+/** Returns true when the bridge's port mapping is in place afterwards. */
 async function serveSection(ctx: Ctx, out: Printer, s: Settings, p: Prompter): Promise<boolean> {
   const ts = await tailscaleStatus(ctx.tailscale);
   const desired = `http://127.0.0.1:${s.port}`;
-  const cmd = shellCommand("tailscale", serveArgs(s.servePath, s.port));
+  const cmd = shellCommand("tailscale", serveArgs(s.servePort, s.port));
   if (!ctx.tailscaleBin || !ts.running) {
     out.warn(`Tailscale is not running${ctx.tailscaleBin ? "" : " (tailscale CLI not found)"}.`, `Start Tailscale, then: rex-grokbot setup serve`);
     return false;
   }
-  const current = await serveTarget(ctx.tailscale, s.servePath);
+  const origin = bridgeOrigin(ts.dnsName, s.servePort);
+  const current = await portTarget(ctx.tailscale, s.servePort);
   if (servesDesired(current, desired)) {
-    out.ok(`Already maps https://${ts.dnsName}${s.servePath} → ${desired}`);
-    return true;
-  }
-  let run: boolean;
-  if (current.kind === "occupied") {
-    // Never overwritten by default (so --yes leaves it alone).
-    out.warn(`Tailscale Serve already maps ${s.servePath} → ${current.target}.`);
-    run = await p.confirm(`Replace it with ${desired}?`, false);
-  } else if (current.kind === "unknown") {
-    out.warn(`Could not read Tailscale Serve's current config (${current.reason}), so setup can't tell whether ${s.servePath} is in use.`);
-    run = await p.confirm(`Run \`${cmd}\` anyway (it replaces anything at ${s.servePath})?`, false);
+    out.ok(`Already maps ${origin} → ${desired}`);
   } else {
-    out.note(`To expose the bridge on your tailnet (tailnet only, not Funnel), setup will run:\n         ${cmd}`);
-    run = await p.confirm("Run it now?", true);
+    let run: boolean;
+    if (current.kind === "occupied") {
+      // Never overwritten by default (so --yes leaves it alone).
+      out.warn(`Tailscale Serve port ${s.servePort} is already in use: ${current.target}.`, `pick another port: rex-grokbot config set servePort <port>, then: rex-grokbot setup serve`);
+      run = await p.confirm(`Replace everything on port ${s.servePort} with ${desired}?`, false);
+    } else if (current.kind === "unknown") {
+      out.warn(`Could not read Tailscale Serve's current config (${current.reason}), so setup can't tell whether port ${s.servePort} is in use.`);
+      run = await p.confirm(`Run \`${cmd}\` anyway (it replaces anything at ${origin}/)?`, false);
+    } else {
+      out.note(`To give the bridge its own HTTPS origin on your tailnet (tailnet only, not Funnel), setup will run:\n         ${cmd}`);
+      run = await p.confirm("Run it now?", true);
+    }
+    if (!run) {
+      out.warn("Tailscale Serve not changed.", cmd);
+      return false;
+    }
+    // Replacing an occupied port: clear it first, or other paths on it would stay beside our `/`.
+    if (current.kind === "occupied") {
+      const off = await ctx.tailscale(serveOffArgs(s.servePort));
+      if (off.code !== 0) {
+        out.fail(`tailscale serve off failed: ${(off.stderr || off.stdout).trim()}`, shellCommand("tailscale", serveOffArgs(s.servePort)));
+        return false;
+      }
+    }
+    const r = await ctx.tailscale(serveArgs(s.servePort, s.port));
+    if (r.code !== 0) {
+      out.fail(`tailscale serve failed: ${(r.stderr || r.stdout).trim()}`, cmd);
+      return false;
+    }
+    out.ok(`${origin} → ${desired}`);
+    out.note(`Connector URL: ${origin}/mcp (rex-grokbot url)`);
   }
-  if (!run) {
-    out.warn("Tailscale Serve not changed.", cmd);
-    return false;
-  }
-  const r = await ctx.tailscale(serveArgs(s.servePath, s.port));
-  if (r.code !== 0) {
-    out.fail(`tailscale serve failed: ${(r.stderr || r.stdout).trim()}`, cmd);
-    return false;
-  }
-  out.ok(`https://${ts.dnsName}${s.servePath} → ${desired}`);
+  await migrateLegacyServe(ctx, out, s, p, ts.dnsName, origin, desired);
   return true;
+}
+
+/**
+ * ≤ 0.4 mapped `/rex-bridge` on :443, an origin other apps share (and whose OAuth metadata can hijack the
+ * connector). Once the port mapping answers, offer to remove that path, only when it proxies to our bridge.
+ * `/`, other paths, and a foreign or unreadable mapping are never touched.
+ */
+async function migrateLegacyServe(ctx: Ctx, out: Printer, s: Settings, p: Prompter, dnsName: string | undefined, origin: string, desired: string) {
+  const path = legacyServePath(s);
+  if (!servesDesired(await legacyPathTarget(ctx.tailscale, path), desired)) return;
+  const offCmd = shellCommand("tailscale", legacyServeOffArgs(path));
+  out.warn(`The old mapping ${legacyUrl(dnsName, path)} → ${desired} (0.4 and earlier) is still on port 443, which other apps share.`);
+  const health = await getJson(ctx.fetch, `${origin}/healthz`, 8000);
+  if (!(health.status === 200 && health.body?.ok === true)) {
+    out.warn(`Kept it for now: ${origin}/healthz didn't answer (${health.error ?? `HTTP ${health.status}`}), so the new mapping isn't confirmed working.`, `once rex-grokbot doctor is green: ${offCmd}`);
+    return;
+  }
+  if (!(await p.confirm(`Remove the old ${path} mapping on port 443 (only that path)?`, true))) {
+    out.warn("Old mapping left in place.", offCmd);
+    return;
+  }
+  const r = await ctx.tailscale(legacyServeOffArgs(path));
+  if (r.code !== 0) {
+    out.fail(`removing the old mapping failed: ${(r.stderr || r.stdout).trim()}`, offCmd);
+    return;
+  }
+  out.ok(`Removed the old mapping ${legacyUrl(dnsName, path)}`);
+  out.note(`The connector URL changed: set the rex connector in Grok Bot to ${origin}/mcp`);
 }
 
 async function skillSection(ctx: Ctx, out: Printer): Promise<void> {

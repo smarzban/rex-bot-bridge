@@ -4,9 +4,19 @@ import type { Ctx } from "./context.js";
 import { bootstrapCommand, domain, LABELS, LEGACY_LABELS, plistPath, serviceState } from "./launchd.js";
 import { describe, enrich, postWebhook } from "./notify.js";
 import { checkConfig, inspectBlock } from "./rexconfig.js";
-import { readSettings } from "./settings.js";
+import { legacyServePath, readSettings } from "./settings.js";
 import { skillsPresent } from "./skills.js";
-import { bridgeUrl, serveArgs, serveTarget, shellCommand, tailscaleStatus } from "./tailscale.js";
+import {
+  bridgeOrigin,
+  legacyPathTarget,
+  legacyServeOffArgs,
+  legacyUrl,
+  portTarget,
+  serveArgs,
+  servesDesired,
+  shellCommand,
+  tailscaleStatus,
+} from "./tailscale.js";
 import { webhookHint } from "./webhook.js";
 
 export type Level = "ok" | "warn" | "fail";
@@ -20,7 +30,7 @@ export interface Check {
 const ICON: Record<Level, string> = { ok: "✅", warn: "⚠️ ", fail: "❌" };
 const HEARTBEAT_MAX_S = 120;
 
-async function getJson(f: typeof fetch, url: string, timeoutMs = 4000): Promise<{ status: number; body?: any; error?: string }> {
+export async function getJson(f: typeof fetch, url: string, timeoutMs = 4000): Promise<{ status: number; body?: any; error?: string }> {
   try {
     const r = await f(url, { signal: AbortSignal.timeout(timeoutMs) });
     const text = await r.text();
@@ -141,22 +151,34 @@ export async function runDoctor(ctx: Ctx, opts: { testWebhook: boolean }): Promi
   // Tailscale
   const ts = await tailscaleStatus(ctx.tailscale);
   const tsLevel: Level = serveSkipped ? "warn" : "fail";
-  const serveCmd = shellCommand("tailscale", serveArgs(s.servePath, s.port));
+  const serveCmd = shellCommand("tailscale", serveArgs(s.servePort, s.port));
   if (!ctx.tailscaleBin) add("tailscale", tsLevel, "tailscale CLI not found", "Install Tailscale (https://tailscale.com/download)");
   else if (!ts.running) add("tailscale", tsLevel, `Tailscale not running (${ts.backendState ?? "unknown"})`, "Open Tailscale and log in");
   else add("tailscale", "ok", `Tailscale up as ${ts.dnsName}`);
 
   if (ts.running) {
-    const t = await serveTarget(ctx.tailscale, s.servePath);
+    const t = await portTarget(ctx.tailscale, s.servePort);
     const target = t.kind === "occupied" ? t.target : null;
     const desired = `http://127.0.0.1:${s.port}`;
+    const origin = bridgeOrigin(ts.dnsName, s.servePort);
     if (serveSkipped && target !== desired) {
-      add("serve", "warn", `Tailscale Serve not set up by setup (--no-serve)${target ? `; ${s.servePath} → ${target}` : ""}`, serveCmd);
+      add("serve", "warn", `Tailscale Serve not set up by setup (--no-serve)${target ? `; port ${s.servePort} → ${target}` : ""}`, serveCmd);
     } else if (target === desired) {
-      add("serve", "ok", `Tailscale Serve ${s.servePath} → ${desired}`);
-      const remote = await getJson(ctx.fetch, `${bridgeUrl(ts.dnsName, s.servePath)}/healthz`, 8000);
-      if (remote.status === 200 && remote.body?.ok) add("bridge_tailnet", "ok", "bridge /healthz reachable over the tailnet URL");
-      else
+      add("serve", "ok", `Tailscale Serve ${origin} → ${desired}`);
+      const remote = await getJson(ctx.fetch, `${origin}/healthz`, 8000);
+      if (remote.status === 200 && remote.body?.ok) {
+        add("bridge_tailnet", "ok", `bridge /healthz reachable at ${origin}`);
+        // No other app's OAuth metadata on our origin: MCP clients that get our 401 look for it there.
+        const wk = await getJson(ctx.fetch, `${origin}/.well-known/oauth-authorization-server`, 8000);
+        if (wk.status === 404) add("oauth_discovery", "ok", "no OAuth metadata on the bridge's origin (/.well-known/oauth-authorization-server → 404)");
+        else
+          add(
+            "oauth_discovery",
+            "fail",
+            `${origin}/.well-known/oauth-authorization-server answered ${wk.error ?? `HTTP ${wk.status}`} (expected 404); a client may try OAuth instead of the bearer token`,
+            `tailscale serve status (port ${s.servePort} must map only / → ${desired}), then: rex-grokbot setup serve`,
+          );
+      } else
         add(
           "bridge_tailnet",
           remote.status === 502 ? bridgeLevel : "fail",
@@ -168,9 +190,21 @@ export async function runDoctor(ctx: Ctx, opts: { testWebhook: boolean }): Promi
         t.kind === "unknown"
           ? `Could not read Tailscale Serve status (${t.reason})`
           : target
-            ? `Tailscale Serve ${s.servePath} → ${target} (expected ${desired})`
-            : `Tailscale Serve has no ${s.servePath} mapping`;
-      add("serve", "fail", what, t.kind === "unknown" ? "tailscale serve status" : serveCmd);
+            ? `Tailscale Serve port ${s.servePort} → ${target} (expected only ${desired})`
+            : `Tailscale Serve has no port ${s.servePort} mapping`;
+      const fix = t.kind === "unknown" ? "tailscale serve status" : target ? `rex-grokbot config set servePort <free port>, then: rex-grokbot setup serve` : serveCmd;
+      add("serve", "fail", what, fix);
+    }
+
+    // The ≤ 0.4 mapping on :443 (shared with other apps): flag it only when it is ours.
+    const path = legacyServePath(s);
+    if (servesDesired(await legacyPathTarget(ctx.tailscale, path), desired)) {
+      add(
+        "serve_legacy",
+        "warn",
+        `old mapping ${legacyUrl(ts.dnsName, path)} → ${desired} still on port 443 (shared with other apps; the connector should use ${origin}/mcp)`,
+        shellCommand("tailscale", legacyServeOffArgs(path)),
+      );
     }
   }
 

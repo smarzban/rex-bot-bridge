@@ -25,7 +25,7 @@ import {
 import { readSettings, setKey, writeSettings, DEFAULTS } from "../src/settings.js";
 import { migrateWatched } from "../src/setup.js";
 import { installSkills, uninstallSkills, SKILL_MARKER } from "../src/skills.js";
-import { serveTarget } from "../src/tailscale.js";
+import { legacyPathTarget, portTarget } from "../src/tailscale.js";
 import { childEnv, tempDir } from "./helpers.js";
 
 const execFileP = promisify(execFile);
@@ -46,7 +46,8 @@ test("settings: write creates dir 700 and file 600; read merges defaults", async
   const s = await readSettings(file);
   assert.equal(s.mode, "full");
   assert.equal(s.port, 7412);
-  assert.equal(s.servePath, "/rex-bridge");
+  assert.equal(s.servePort, 8443);
+  assert.equal(s.servePath, undefined, "new installs have no legacy path");
 });
 
 test("settings: setKey validates", () => {
@@ -54,7 +55,12 @@ test("settings: setKey validates", () => {
   assert.throws(() => setKey(DEFAULTS, "port", "99999"), /port/);
   assert.throws(() => setKey(DEFAULTS, "webhook.url", "ftp://x"), /https/);
   assert.throws(() => setKey(DEFAULTS, "webhook.header", "Bad Header"), /header/);
-  assert.throws(() => setKey(DEFAULTS, "servePath", "no-slash"), /servePath/);
+  assert.throws(() => setKey(DEFAULTS, "servePort", "443"), /own origin/);
+  assert.throws(() => setKey(DEFAULTS, "servePort", "0"), /servePort must be 1-65535/);
+  assert.throws(() => setKey(DEFAULTS, "servePort", "70000"), /servePort/);
+  assert.throws(() => setKey(DEFAULTS, "servePort", "84.43"), /servePort/);
+  assert.equal(setKey(DEFAULTS, "servePort", "10000").servePort, 10000);
+  assert.throws(() => setKey(DEFAULTS, "servePath" as never, "/x"), /unknown key/);
   assert.equal(setKey(setKey(DEFAULTS, "webhook.key", "k"), "webhook.key", "").webhook.key, undefined);
 });
 
@@ -367,13 +373,14 @@ test("skills: installed only under existing roots; uninstall removes only ours",
 
 // ---------- tailscale ----------
 
-test("tailscale: serveTarget reads the :443 handler for the path", async () => {
+test("tailscale: legacyPathTarget reads the :443 handler for the path", async () => {
   const status = { Web: { "mac.tail.ts.net:443": { Handlers: { "/rex-bridge": { Proxy: "http://127.0.0.1:7400" } } } } };
   const ts: Runner = async () => ({ stdout: JSON.stringify(status), stderr: "", code: 0 });
-  assert.deepEqual(await serveTarget(ts, "/rex-bridge"), { kind: "occupied", target: "http://127.0.0.1:7400" });
-  assert.deepEqual(await serveTarget(ts, "/other"), { kind: "absent" });
+  assert.deepEqual(await legacyPathTarget(ts, "/rex-bridge"), { kind: "occupied", target: "http://127.0.0.1:7400" });
+  assert.deepEqual(await legacyPathTarget(ts, "/other"), { kind: "absent" });
+  assert.deepEqual(await portTarget(ts, 8443), { kind: "absent" }, "a :443 path is not the port mapping");
   const empty: Runner = async () => ({ stdout: "{}", stderr: "", code: 0 });
-  assert.deepEqual(await serveTarget(empty, "/rex-bridge"), { kind: "absent" });
+  assert.deepEqual(await legacyPathTarget(empty, "/rex-bridge"), { kind: "absent" });
 });
 
 test("launchd uninstall: only boots out services whose plist is in this HOME", async () => {

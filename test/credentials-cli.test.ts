@@ -12,7 +12,7 @@ import { childEnv, tempDir } from "./helpers.js";
 const ROOT = join(import.meta.dirname, "..");
 const CLI = join(ROOT, "dist/cli/rex-grokbot.js");
 const FAKE = "fake-cli-token-not-a-secret-0123456789abcdef";
-const SERVE_OURS = JSON.stringify({ Web: { "mac.tail.ts.net:443": { Handlers: { "/rex-bridge": { Proxy: "http://127.0.0.1:7400" } } } } });
+const SERVE_OURS = JSON.stringify({ Web: { "mac.tail.ts.net:8443": { Handlers: { "/": { Proxy: "http://127.0.0.1:7400" } } } } });
 
 /** `loaded`: whether the stub's `launchctl print` reports the bridge loaded. `kickstartFails`: exit 1 on kickstart. */
 async function sandbox(o: { loaded: boolean; kickstartFails?: boolean; serveStatus?: string }) {
@@ -54,15 +54,15 @@ async function sandbox(o: { loaded: boolean; kickstartFails?: boolean; serveStat
 test("CLI url: stdout is only the connector URL; no warning when Serve maps it", async () => {
   const sb = await sandbox({ loaded: false });
   const r = sb.run("url");
-  assert.deepEqual([r.status, r.stdout, r.stderr], [0, "https://mac.tail.ts.net/rex-bridge/mcp\n", ""]);
+  assert.deepEqual([r.status, r.stdout, r.stderr], [0, "https://mac.tail.ts.net:8443/mcp\n", ""]);
 });
 
 test("CLI url: Serve not mapped → same stdout, warning + fix line on stderr", async () => {
   const sb = await sandbox({ loaded: false, serveStatus: "{}" });
   const r = sb.run("url");
   assert.equal(r.status, 0);
-  assert.equal(r.stdout, "https://mac.tail.ts.net/rex-bridge/mcp\n");
-  assert.equal(r.stderr, "rex-grokbot: warning: Tailscale Serve doesn't map /rex-bridge to the bridge yet.\n  fix: rex-grokbot setup serve\n");
+  assert.equal(r.stdout, "https://mac.tail.ts.net:8443/mcp\n");
+  assert.equal(r.stderr, "rex-grokbot: warning: Tailscale Serve doesn't map port 8443 to the bridge yet.\n  fix: rex-grokbot setup serve\n");
 });
 
 test("CLI token --rotate, bridge loaded: new token in the file and alone on stdout; stub launchctl kickstarted -k", async () => {

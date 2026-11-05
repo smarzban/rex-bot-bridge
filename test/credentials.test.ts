@@ -12,7 +12,7 @@ import { installSkills, uninstallSkills } from "../src/skills.js";
 import { fakeCtx, tempDir } from "./helpers.js";
 
 const ok = (stdout = "") => ({ stdout, stderr: "", code: 0 });
-const SERVE_OURS = ok(JSON.stringify({ Web: { "mac.tail.ts.net:443": { Handlers: { "/rex-bridge": { Proxy: "http://127.0.0.1:7400" } } } } }));
+const SERVE_OURS = ok(JSON.stringify({ Web: { "mac.tail.ts.net:8443": { Handlers: { "/": { Proxy: "http://127.0.0.1:7400" } } } } }));
 const FAKE = "fake-token-for-tests-0123456789abcdefghijklmno";
 
 async function withToken(f: Awaited<ReturnType<typeof fakeCtx>>) {
@@ -90,14 +90,14 @@ test("token --rotate: bridge not loaded → no kickstart, still rotates", async 
   assert.match(f.out.join("\n"), /isn't loaded, so nothing was restarted/);
 });
 
-test("url: prints only https://<dns>/rex-bridge/mcp; warns on stderr when Serve isn't mapped; exit 1 without Tailscale", async () => {
+test("url: prints only https://<dns>:8443/mcp; warns on stderr when Serve isn't mapped; exit 1 without Tailscale", async () => {
   const f = await fakeCtx(SERVE_OURS);
   const stdout: string[] = [];
   const stderr: string[] = [];
   f.ctx.out = (s) => stdout.push(s);
   f.ctx.err = (s) => stderr.push(s);
   assert.equal(await urlCommand(f.ctx), 0);
-  assert.deepEqual([stdout, stderr], [["https://mac.tail.ts.net/rex-bridge/mcp"], []]);
+  assert.deepEqual([stdout, stderr], [["https://mac.tail.ts.net:8443/mcp"], []]);
 
   const g = await fakeCtx(ok("{}"));
   const gout: string[] = [];
@@ -105,9 +105,9 @@ test("url: prints only https://<dns>/rex-bridge/mcp; warns on stderr when Serve 
   g.ctx.out = (s) => gout.push(s);
   g.ctx.err = (s) => gerr.push(s);
   assert.equal(await urlCommand(g.ctx), 0);
-  assert.deepEqual(gout, ["https://mac.tail.ts.net/rex-bridge/mcp"], "stdout stays just the URL");
+  assert.deepEqual(gout, ["https://mac.tail.ts.net:8443/mcp"], "stdout stays just the URL");
   assert.equal(gerr.length, 1);
-  assert.match(gerr[0]!, /^rex-grokbot: warning: Tailscale Serve doesn't map \/rex-bridge to the bridge yet\.\n {2}fix: rex-grokbot setup serve$/);
+  assert.match(gerr[0]!, /^rex-grokbot: warning: Tailscale Serve doesn't map port 8443 to the bridge yet\.\n {2}fix: rex-grokbot setup serve$/);
 
   // Serve status unreadable (target.kind === "unknown"): "couldn't confirm", fix points at doctor.
   const u = await fakeCtx({ stdout: "", stderr: "serve: permission denied", code: 1 });
@@ -116,9 +116,9 @@ test("url: prints only https://<dns>/rex-bridge/mcp; warns on stderr when Serve 
   u.ctx.out = (s) => uout.push(s);
   u.ctx.err = (s) => uerr.push(s);
   assert.equal(await urlCommand(u.ctx), 0);
-  assert.deepEqual(uout, ["https://mac.tail.ts.net/rex-bridge/mcp"]);
+  assert.deepEqual(uout, ["https://mac.tail.ts.net:8443/mcp"]);
   assert.equal(uerr.length, 1);
-  assert.match(uerr[0]!, /^rex-grokbot: warning: couldn't confirm that Tailscale Serve maps \/rex-bridge to the bridge \(serve: permission denied\)\.\n {2}fix: rex-grokbot doctor$/);
+  assert.match(uerr[0]!, /^rex-grokbot: warning: couldn't confirm that Tailscale Serve maps port 8443 to the bridge \(serve: permission denied\)\.\n {2}fix: rex-grokbot doctor$/);
 
   const h = await fakeCtx(ok("{}"));
   h.ctx.tailscale = async () => ({ stdout: "", stderr: "not running", code: 1 });
