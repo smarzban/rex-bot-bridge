@@ -129,7 +129,8 @@ export function buildMcpServer(ops: Ops, audit: AuditLog): McpServer {
         "shell (login shell, no prompt) or custom (command = argv array). Give session_id to open a new tab in an " +
         "existing session, or new_session_label to create a new session. With watch=true (default) the session is " +
         "added to the bot-watch list so status changes are pushed to the coordinator. Returns session_id and block_id. " +
-        "In watched mode (see bridge_status) session_id must be a watched session, and a new session is always watched.",
+        "In watched mode (see bridge_status) session_id must be a watched session, a new session is always watched, " +
+        "and watch is ignored (the bot never adds an existing session to the list).",
       inputSchema: {
         agent: z.enum(AGENTS),
         cwd: z.string().min(1).describe("Absolute directory (or ~/...)"),

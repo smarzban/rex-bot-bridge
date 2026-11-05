@@ -9,9 +9,8 @@ import { makeCtx } from "../context.js";
 import { formatChecks, runDoctor } from "../doctor.js";
 import { grokbotText } from "../grokbot.js";
 import { describe, enrich, postWebhook } from "../notify.js";
-import { Ops } from "../ops.js";
 import { makePrompter } from "../prompt.js";
-import { Rex, spawnRunner } from "../rex.js";
+import { buildServeOps } from "../serve.js";
 import { createBridgeHttpServer } from "../server.js";
 import { ensurePrivateDir, getKey, isKey, KEYS, MODES, readSettings, SECRET_KEYS, setKey, writeSettings, type Mode } from "../settings.js";
 import { setup } from "../setup.js";
@@ -86,13 +85,7 @@ async function serve(): Promise<number> {
     return 1;
   }
   const audit = new AuditLog(cfg.auditLog);
-  const ops = new Ops({
-    rex: new Rex(spawnRunner(cfg.rexBin)),
-    watch: new WatchFile(cfg.watchedFile),
-    heartbeatFile: cfg.heartbeatFile,
-    auditLogPath: cfg.auditLog,
-    mode: cfg.getMode,
-  });
+  const ops = buildServeOps(cfg);
   const server = createBridgeHttpServer({ ops, audit, getToken: () => readToken(cfg.tokenFile) });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);

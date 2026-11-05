@@ -47,8 +47,8 @@ export interface OpsDeps {
   pollMs?: number;
   /** Delay between a paste and the Enter that submits it (default 150ms). */
   pasteSettleMs?: number;
-  /** Powers: "watched" limits pane/session tools to watched sessions. Read per call. Default "full". */
-  mode?: () => Promise<Mode>;
+  /** Powers: "watched" limits pane/session tools to watched sessions. Read per call. Required (fail closed). */
+  mode: () => Promise<Mode>;
 }
 
 export const OPT_IN_HINT =
@@ -81,7 +81,7 @@ export class Ops {
   private readonly mode: () => Promise<Mode>;
 
   constructor(private readonly deps: OpsDeps) {
-    this.mode = deps.mode ?? (async () => "full");
+    this.mode = deps.mode;
     this.rex = deps.rex;
     this.watch = deps.watch;
     this.sleep = deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
@@ -231,11 +231,21 @@ export class Ops {
       res = await this.rex.newSession(opts.new_session_label as string, cwd, argv);
       if (opts.label) await this.rex.renameBlock(res.session_id, res.block_id, opts.label);
     }
-    let watched = false;
-    // In watched mode a new session is always watched, or the bot could not reach the agent it just spawned.
-    if (opts.watch || (watchedMode && opts.new_session_label)) {
+    let watched: boolean;
+    if (watchedMode) {
+      // Only a session the bot just created is added (or it could not reach its own agent). An existing
+      // session is never (re-)added: the human may have unwatched it while the spawn was in flight.
+      if (opts.new_session_label) {
+        await this.watch.add(res.session_id);
+        watched = true;
+      } else {
+        watched = (await this.watch.list()).includes(res.session_id);
+      }
+    } else if (opts.watch) {
       await this.watch.add(res.session_id);
       watched = true;
+    } else {
+      watched = (await this.watch.list()).includes(res.session_id);
     }
     return { ...res, agent: opts.agent, argv, cwd, watched };
   }
@@ -245,6 +255,8 @@ export class Ops {
     const deadline = this.now() + timeoutS * 1000;
     let last: StatusRecord | null = null;
     for (;;) {
+      // Access can be revoked mid-wait (unwatched, or mode switched to watched): recheck before each poll.
+      await this.gateSession("wait_for_status", session);
       last = await this.rex.status(session, blockId);
       if (last && states.includes(last.state)) {
         return { session_id: session, block_id: blockId, timed_out: false, status: last };
