@@ -18,6 +18,8 @@ export interface Ctx {
   tailscaleBin: string | null;
   tailscale: Runner;
   fetch: typeof fetch;
+  /** Waits (launchd polling/retries); tests make it instant. Defaults to a real timer. */
+  sleep?: (ms: number) => Promise<void>;
   out: (s: string) => void;
   err: (s: string) => void;
 }

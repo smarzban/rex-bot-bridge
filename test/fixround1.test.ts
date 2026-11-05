@@ -205,7 +205,6 @@ const FLAGS: SetupFlags = {
   serve: true,
   skills: false,
   rexConfig: false,
-  showToken: false,
 };
 
 /** Records every confirm() question with its default. */
@@ -289,21 +288,20 @@ test("K2 setup: our own mapping is left alone without asking", async () => {
   await setup(f.ctx, { ...FLAGS }, p);
   assert.equal(asked.filter((a) => !a.q.includes("bearer token")).length, 0);
   assert.equal(f.tsCalls.filter(isServeRun).length, 0);
-  assert.ok(f.out.some((l) => l.includes("already maps")));
+  assert.ok(f.out.some((l) => /already maps/i.test(l)));
 });
 
-test("K8 setup: the token is printed only with --show-token or an explicit yes", async () => {
-  const run = async (flags: Partial<SetupFlags>, p: Prompter) => {
+test("K8/T429 setup: never prints the token, whatever is answered", async () => {
+  for (const [flags, p] of [
+    [{}, scriptedPrompter()],
+    [{ yes: true }, makePrompter(true)],
+    [{}, scriptedPrompter({ token: true, "bearer token": true })],
+  ] as [Partial<SetupFlags>, Prompter][]) {
     const f = await fakeCtx(ok("{}"));
     const { token } = await ensureToken(f.ctx.paths.tokenFile);
     await setup(f.ctx, { ...FLAGS, serve: false, ...flags }, p);
-    return f.out.join("\n").includes(token);
-  };
-  assert.equal(await run({}, scriptedPrompter()), false, "interactive default is no");
-  assert.equal(await run({ yes: true }, makePrompter(true)), false, "--yes never shows it");
-  assert.equal(await run({}, scriptedPrompter({ "bearer token": false })), false);
-  assert.equal(await run({}, scriptedPrompter({ "bearer token": true })), true);
-  assert.equal(await run({ showToken: true }, makePrompter(true)), true);
+    assert.ok(!f.out.join("\n").includes(token));
+  }
 });
 
 test("K8 uninstall: state dir kept without --purge, deleted with it", async () => {
