@@ -383,17 +383,17 @@ test("launchd uninstall: only boots out services whose plist is in this HOME", a
   const calls: string[][] = [];
   const launchctl: Runner = async (args) => {
     calls.push(args);
-    return { stdout: "", stderr: "", code: 0 };
+    return { stdout: "", stderr: "", code: args[0] === "print" ? 113 : 0 };
   };
   assert.deepEqual(await uninstallServices(paths, launchctl), []);
   assert.equal(calls.length, 0, "no launchctl calls without our plists");
 
-  await installServices({ paths, node: "/n", cli: "/c.js", rexBin: "/r/rex", pkgRoot: "/p" }, launchctl);
+  await installServices({ paths, node: "/n", cli: "/c.js", rexBin: "/r/rex", pkgRoot: "/p" }, launchctl, { sleep: async () => {} });
   assert.deepEqual(
     calls.map((c) => c[0]),
-    ["bootout", "bootstrap", "bootout", "bootstrap"],
+    ["bootout", "print", "bootstrap", "bootout", "print", "bootstrap"],
   );
-  assert.equal(calls[1]![2], join(home, `Library/LaunchAgents/${LABELS.bridge}.plist`));
+  assert.equal(calls[2]![2], join(home, `Library/LaunchAgents/${LABELS.bridge}.plist`));
   calls.length = 0;
   assert.deepEqual(await uninstallServices(paths, launchctl), [LABELS.bridge, LABELS.watch]);
   assert.deepEqual(calls.map((c) => c[0]), ["bootout", "bootout"]);

@@ -93,21 +93,66 @@ export function domain(uid = process.getuid?.() ?? 501): string {
   return `gui/${uid}`;
 }
 
-/** Writes both plists and (re)loads them: bootout (ignored if not loaded), then bootstrap. */
-export async function installServices(ctx: ServiceContext, launchctl: Runner): Promise<string[]> {
+export interface InstallOptions {
+  /** Waits between polls and retries; injectable so tests run instantly. */
+  sleep?: (ms: number) => Promise<void>;
+  /** How long to wait for a bootout to finish before bootstrapping anyway. */
+  bootoutWaitMs?: number;
+  /** How many times bootstrap is tried. */
+  tries?: number;
+}
+
+export interface ServiceResult {
+  label: string;
+  ok: boolean;
+  /** launchctl's message when bootstrap failed on every try. */
+  error?: string;
+  plist: string;
+}
+
+const realSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** The exact command that loads one of our services by hand. */
+export function bootstrapCommand(paths: Paths, label: string): string {
+  return `launchctl bootstrap gui/$(id -u) '${plistPath(paths, label)}'`;
+}
+
+/**
+ * Writes both plists and (re)loads them. `bootout` returns before launchd has finished unloading, and a
+ * bootstrap in that window fails ("Bootstrap failed: 5: Input/output error"), so this waits until
+ * `launchctl print` no longer finds the label, then bootstraps with retries and backoff.
+ * Never throws for a launchctl failure: each service's result says whether it loaded.
+ */
+export async function installServices(ctx: ServiceContext, launchctl: Runner, opts: InstallOptions = {}): Promise<ServiceResult[]> {
+  const sleep = opts.sleep ?? realSleep;
+  const waitMs = opts.bootoutWaitMs ?? 10_000;
+  const tries = opts.tries ?? 3;
   const specs = serviceSpecs(ctx);
   await mkdir(ctx.paths.launchAgentsDir, { recursive: true });
   await mkdir(ctx.paths.logsDir, { recursive: true, mode: 0o700 });
-  const done: string[] = [];
+  const results: ServiceResult[] = [];
   for (const spec of Object.values(specs)) {
     const path = plistPath(ctx.paths, spec.label);
+    const target = `${domain()}/${spec.label}`;
     await writeFile(path, await renderPlist(spec), { mode: 0o644 });
-    await launchctl(["bootout", `${domain()}/${spec.label}`]);
-    const r = await launchctl(["bootstrap", domain(), path]);
-    if (r.code !== 0) throw new Error(`launchctl bootstrap ${spec.label} failed: ${(r.stderr || r.stdout).trim()}`);
-    done.push(spec.label);
+    await launchctl(["bootout", target]);
+    for (let waited = 0; waited < waitMs; waited += 250) {
+      if ((await launchctl(["print", target])).code !== 0) break;
+      await sleep(250);
+    }
+    let error: string | undefined;
+    for (let i = 0; i < tries; i++) {
+      if (i > 0) await sleep(500 * 2 ** (i - 1));
+      const r = await launchctl(["bootstrap", domain(), path]);
+      if (r.code === 0) {
+        error = undefined;
+        break;
+      }
+      error = (r.stderr || r.stdout).trim() || `exit ${r.code}`;
+    }
+    results.push({ label: spec.label, ok: !error, error, plist: path });
   }
-  return done;
+  return results;
 }
 
 /**
