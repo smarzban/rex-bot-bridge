@@ -265,6 +265,32 @@ const purge = await cli(["uninstall", "--yes", "--purge"]);
 check(purge.code === 0 && !(await stat(join(SB, ".config/rex-bot-bridge")).catch(() => null)), "uninstall --purge deletes the state dir");
 check((await readdir(join(SB, ".config/rex/rex-bot-backups")).catch(() => [])).length >= 2, "uninstall --purge keeps the init.lua backups");
 
+// ---- 7. package: npm pack → global install into a temp prefix → the bin runs ----
+{
+  const pkgVersion = JSON.parse(await readFile(join(ROOT, "package.json"), "utf8")).version;
+  const packDir = join(SB, "pack");
+  const prefix = join(SB, "npm-prefix");
+  await mkdir(packDir);
+  // Only this sandbox: never the real global prefix.
+  const npmEnv = { ...process.env, npm_config_prefix: prefix, NPM_CONFIG_PREFIX: prefix };
+  delete npmEnv.npm_config_global;
+  const packed = await run("npm", ["pack", "--pack-destination", packDir, "--loglevel=error"], { cwd: ROOT, env: npmEnv, timeout: 180_000 }).then(
+    (r) => r.stdout.trim().split("\n").pop(),
+    (e) => (console.log(e.stderr), null),
+  );
+  check(!!packed, `npm pack produced ${packed}`);
+  const inst = await run("npm", ["install", "-g", "--prefix", prefix, "--no-audit", "--no-fund", "--loglevel=error", join(packDir, packed ?? "missing.tgz")], { env: npmEnv, timeout: 180_000 }).then(
+    () => true,
+    (e) => (console.log(e.stderr), false),
+  );
+  check(inst, `npm i -g --prefix <sandbox> ${packed}`);
+  const bin = join(prefix, "bin/rex-bot");
+  const mode = (await stat(bin).catch(() => null))?.mode ?? 0;
+  check((mode & 0o111) !== 0, `installed bin is executable (mode ${(mode & 0o777).toString(8)})`);
+  const ver = await run(bin, ["--version"]).then((r) => r.stdout.trim(), (e) => `error: ${e.message}`);
+  check(ver === pkgVersion, `<prefix>/bin/rex-bot --version prints ${ver} (package.json ${pkgVersion})`);
+}
+
 sink.close();
 console.log(`\n${failures ? `${failures} FAILED` : "ALL PASSED"} (sandbox ${SB})`);
 process.exit(failures ? 1 : 0);

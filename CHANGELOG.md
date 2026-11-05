@@ -27,7 +27,10 @@ Setup v3: no more circular order for new users, a Grok Bot guide, tsk-style help
   until the label is gone (up to 10 s), retries bootstrap 3 times with backoff, and names the service that failed
   with launchctl's message and the exact `launchctl bootstrap` line.
 - **Fix: `uninstall --purge` deleted the init.lua backup it had just made.** Backups now live next to init.lua in
-  `~/.config/rex/rex-bot-backups/` and survive `--purge`; two backups in the same millisecond no longer overwrite.
+  `~/.config/rex/rex-bot-backups/` and survive `--purge`; two backups in the same millisecond no longer overwrite. Setup and
+  uninstall move 0.2.x backups out of `~/.config/rex-bot-bridge/init-backups/` first (never overwriting).
+- `setup webhook` re-reads config.json before saving and writes only the `webhook.*` fields.
+- `install.sh` copes with npm 11 redacting UUID-like path segments in `npm prefix -g` (`***`).
 - doctor's fix lines are exact commands (`launchctl bootstrap gui/$(id -u) '<plist>'`, `launchctl kickstart -k …`,
   `rex-bot setup webhook`, `rex-bot setup rex|services|skill`).
 - Packaging: `npm run build` keeps the exec bit on `dist/cli/*.js` (a linked `npm i -g <folder>` no longer says
