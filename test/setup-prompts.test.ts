@@ -1,13 +1,15 @@
 // T428: forgiving interactive webhook prompts in `rex-bot setup` (pasted header lines, re-asks, never abort).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, stat, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
-import { packageVersion } from "../src/cli/main.js";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { spawnSync } from "node:child_process";
 import { makePrompter, scriptedPrompter } from "../src/prompt.js";
 import { readSettings } from "../src/settings.js";
-import { normalizeKeyAnswer, parseHeaderAnswer, setup, type SetupFlags } from "../src/setup.js";
-import { fakeCtx } from "./helpers.js";
+import { HEADER_QUESTION, KEY_QUESTION, parseHeaderAnswer, parseKeyAnswer, setup, type SetupFlags } from "../src/setup.js";
+import { childEnv, fakeCtx, tempDir } from "./helpers.js";
+
+const ROOT = join(import.meta.dirname, "..");
 
 const FLAGS: SetupFlags = {
   yes: false,
@@ -33,11 +35,16 @@ function assertNoSecrets(out: string, ...secrets: string[]) {
   for (const x of secrets) assert.ok(!out.includes(x), `output must not contain ${x.slice(0, 3)}…`);
 }
 
-test("T428 parse: key answers lose a pasted Bearer / Authorization: Bearer prefix", () => {
-  assert.equal(normalizeKeyAnswer("Bearer Z"), "Z");
-  assert.equal(normalizeKeyAnswer("  bearer   Z "), "Z");
-  assert.equal(normalizeKeyAnswer("Authorization: Bearer Z"), "Z");
-  assert.equal(normalizeKeyAnswer("plain-key"), "plain-key");
+test("T428 parse: key answers lose Bearer, and any pasted `Name: value` line gives header + key", () => {
+  assert.deepEqual(parseKeyAnswer("Bearer Z"), { key: "Z" });
+  assert.deepEqual(parseKeyAnswer("  bearer   Z "), { key: "Z" });
+  assert.deepEqual(parseKeyAnswer("Authorization: Bearer Z"), { header: "Authorization", key: "Z" });
+  assert.deepEqual(parseKeyAnswer("X-Webhook-Key: Y"), { header: "X-Webhook-Key", key: "Y" });
+  assert.deepEqual(parseKeyAnswer("plain-key"), { key: "plain-key" });
+  // F: everything after the first colon (and Bearer) is the key; a bare `a:b` key stays a key.
+  assert.deepEqual(parseKeyAnswer("X-Key: abc:def"), { header: "X-Key", key: "abc:def" });
+  assert.deepEqual(parseKeyAnswer("Authorization: Bearer a:b"), { header: "Authorization", key: "a:b" });
+  assert.deepEqual(parseKeyAnswer("abc:def"), { key: "abc:def" });
 });
 
 test("T428 parse: header answers accept a name or a pasted full header line", () => {
@@ -46,6 +53,8 @@ test("T428 parse: header answers accept a name or a pasted full header line", ()
   assert.deepEqual(parseHeaderAnswer("Authorization: Bearer X", "k"), { header: "Authorization", key: "X" });
   assert.deepEqual(parseHeaderAnswer("X-Webhook-Key: Y", "k"), { header: "X-Webhook-Key", key: "Y" });
   assert.deepEqual(parseHeaderAnswer("X-Webhook-Key:", "k"), { header: "X-Webhook-Key", key: "k" });
+  assert.deepEqual(parseHeaderAnswer("X-Key: abc:def", "k"), { header: "X-Key", key: "abc:def" });
+  assert.deepEqual(parseHeaderAnswer("Authorization: Bearer a:b", "k"), { header: "Authorization", key: "a:b" });
   assert.ok("error" in parseHeaderAnswer("not a header", "k"));
   assert.ok(!JSON.stringify(parseHeaderAnswer("bad header secret-val", "k")).includes("secret-val"), "reason never echoes the answer");
 });
@@ -126,6 +135,46 @@ test("T428 setup: the v1 'full powers' hint is gone; mode defaults to watched", 
   }
 });
 
-test("T428 cli: --version prints the package version", () => {
-  assert.match(packageVersion(), /^\d+\.\d+\.\d+/);
+test("T428 setup: the key and header questions are asked with secret:true; header name echoed, value never", async () => {
+  const f = await fakeCtx({ stdout: "{}", stderr: "", code: 0 });
+  const p = scriptedPrompter({ [URL_Q]: URL, [KEY_Q]: "k-secret-666", [HEADER_Q]: "X-Webhook-Key: v-secret-777" });
+  await setup(f.ctx, { ...FLAGS }, p);
+  assert.equal(p.asked.find((a) => a.q === KEY_QUESTION)?.opts.secret, true);
+  assert.equal(p.asked.find((a) => a.q === HEADER_QUESTION)?.opts.secret, true);
+  assert.equal(p.asked.find((a) => a.q.includes(URL_Q))?.opts.secret, undefined);
+  const out = f.out.join("\n");
+  assert.match(out, /Header: X-Webhook-Key/);
+  assertNoSecrets(out, URL, "k-secret-666", "v-secret-777");
+  const s = await readSettings(f.ctx.paths.configFile);
+  assert.deepEqual([s.webhook.header, s.webhook.key], ["X-Webhook-Key", "v-secret-777"]);
+});
+
+test("T428 setup: a `Name: value` line in the key answer sets the header and skips the header question", async () => {
+  const f = await fakeCtx({ stdout: "{}", stderr: "", code: 0 });
+  const p = scriptedPrompter({ [URL_Q]: URL, [KEY_Q]: "X-Key: abc:def" });
+  await setup(f.ctx, { ...FLAGS }, p);
+  assert.ok(!p.asked.some((a) => a.q === HEADER_QUESTION), "header question skipped");
+  const s = await readSettings(f.ctx.paths.configFile);
+  assert.deepEqual([s.webhook.header, s.webhook.key], ["X-Key", "abc:def"]);
+  assert.match(f.out.join("\n"), /Header: X-Key/);
+  assertNoSecrets(f.out.join("\n"), "abc:def");
+});
+
+test("T428 setup: a URL with a port is accepted", async () => {
+  const r = await run({ [URL_Q]: "https://host:8443/x", [KEY_Q]: "" });
+  assert.equal(r.s.webhook.url, "https://host:8443/x");
+});
+
+test("T428 cli: `rex-bot --version` / `-v` exit 0 and print exactly the package.json version", async () => {
+  const pkg = JSON.parse(await readFile(join(ROOT, "package.json"), "utf8")) as { version: string };
+  for (const flag of ["--version", "-v"]) {
+    const home = await tempDir();
+    const r = spawnSync(process.execPath, ["--import", "tsx", join(ROOT, "src/cli/rex-bot.ts"), flag], {
+      cwd: ROOT,
+      env: childEnv({ HOME: home }),
+      encoding: "utf8",
+    });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout, `${pkg.version}\n`);
+  }
 });
