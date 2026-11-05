@@ -1,9 +1,9 @@
-import { rm } from "node:fs/promises";
+import { readdir, rm } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { isSandboxHome, type Ctx } from "./context.js";
 import { uninstallServices } from "./launchd.js";
 import type { Prompter } from "./prompt.js";
-import { uninstallBlock } from "./rexconfig.js";
+import { migrateBackups, uninstallBlock } from "./rexconfig.js";
 import { readSettings } from "./settings.js";
 import { uninstallSkills } from "./skills.js";
 import { serveOffArgs, servesDesired, serveTarget, shellCommand } from "./tailscale.js";
@@ -25,6 +25,9 @@ export async function uninstall(ctx: Ctx, flags: UninstallFlags, p: Prompter): P
     return 0;
   }
   const s = await readSettings(paths.configFile);
+  // 0.2.x kept backups inside the state dir; move them out before anything (--purge) deletes it.
+  const migrated = await migrateBackups(paths.legacyBackupsDir, paths.backupsDir);
+  if (migrated.length) ok(`Moved ${migrated.length} init.lua backup(s) from ${paths.legacyBackupsDir} to ${paths.backupsDir}`);
 
   const removed = await uninstallServices(paths, ctx.launchctl);
   ok(removed.length ? `Services stopped and removed: ${removed.join(", ")}` : "No services installed");
@@ -64,7 +67,8 @@ export async function uninstall(ctx: Ctx, flags: UninstallFlags, p: Prompter): P
 
   if (flags.purge) {
     await rm(paths.stateDir, { recursive: true, force: true });
-    ok(`Deleted ${paths.stateDir} (token, config, watched list, init.lua backups)`);
+    const kept = (await readdir(paths.backupsDir).catch(() => [])).length;
+    ok(`Deleted ${paths.stateDir} (token, config, watched list).${kept ? ` init.lua backups kept in ${paths.backupsDir}` : ""}`);
   } else {
     ctx.out(`   Kept ${paths.stateDir} (token, config, watched list). Delete it with: rex-bot uninstall --purge`);
   }

@@ -1,4 +1,4 @@
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { copyFile, lstat, mkdir, readdir, readFile, rename, rmdir, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import type { Runner } from "./rex.js";
 
@@ -88,9 +88,16 @@ export type RexConfigResult =
 async function backup(opts: RexConfigOptions, content: Buffer): Promise<string> {
   await mkdir(opts.backupsDir, { recursive: true, mode: 0o700 });
   const stamp = (opts.now?.() ?? new Date()).toISOString().replace(/[:.]/g, "-");
-  const path = join(opts.backupsDir, `${basename(opts.initPath)}.${stamp}`);
-  await writeFile(path, content, { mode: 0o600 });
-  return path;
+  // Never overwrite an earlier backup (two runs in the same millisecond get -1, -2, …).
+  for (let i = 0; ; i++) {
+    const path = join(opts.backupsDir, `${basename(opts.initPath)}.${stamp}${i ? `-${i}` : ""}`);
+    try {
+      await writeFile(path, content, { mode: 0o600, flag: "wx" });
+      return path;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST" || i >= 100) throw e;
+    }
+  }
 }
 
 /** `rex config check <path>`; returns null when it passes, else the complaint text. */
@@ -158,4 +165,39 @@ export async function inspectBlock(initPath: string): Promise<{ present: boolean
     actionsPath: m?.[1]?.replace(/\\(.)/g, "$1"),
     legacy: hasLegacyInline(content),
   };
+}
+
+/**
+ * Moves init.lua backups from the 0.2.x location (inside the state dir, which `uninstall --purge` deletes)
+ * into `to`. Never overwrites: a name that's taken gets -1, -2, … Removes the old dir once empty.
+ * Returns the new paths of the moved files.
+ */
+export async function migrateBackups(from: string, to: string): Promise<string[]> {
+  let names: string[];
+  try {
+    names = await readdir(from);
+  } catch {
+    return [];
+  }
+  const moved: string[] = [];
+  for (const name of names) {
+    const src = join(from, name);
+    // Skip anything that isn't a regular file now (a broken symlink, a dir, a file that just vanished).
+    if (!(await lstat(src).catch(() => null))?.isFile()) continue;
+    await mkdir(to, { recursive: true, mode: 0o700 });
+    let dest = join(to, name);
+    for (let i = 1; await lstat(dest).then(() => true, () => false); i++) dest = join(to, `${name}-${i}`);
+    try {
+      await rename(src, dest);
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") continue; // vanished mid-run
+      if (code !== "EXDEV") throw e;
+      await copyFile(src, dest);
+      await unlink(src);
+    }
+    moved.push(dest);
+  }
+  await rmdir(from).catch(() => {}); // only if empty
+  return moved;
 }

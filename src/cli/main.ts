@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
@@ -7,45 +8,20 @@ import { AuditLog } from "../audit.js";
 import { loadConfig } from "../config.js";
 import { makeCtx } from "../context.js";
 import { formatChecks, runDoctor } from "../doctor.js";
-import { grokbotText } from "../grokbot.js";
+import { connectorText } from "../grokbot.js";
 import { describe, enrich, postWebhook } from "../notify.js";
 import { makePrompter } from "../prompt.js";
 import { buildServeOps } from "../serve.js";
 import { createBridgeHttpServer } from "../server.js";
 import { ensurePrivateDir, getKey, isKey, KEYS, MODES, readSettings, SECRET_KEYS, setKey, writeSettings, type Mode } from "../settings.js";
-import { setup } from "../setup.js";
+import { PARTS, setup, type Part } from "../setup.js";
+import { setupWebhook } from "../webhook.js";
+import { commandHelp, TOP_HELP } from "./help.js";
 import { tailscaleStatus } from "../tailscale.js";
 import { ensureToken, readToken } from "../token.js";
 import { SESSION_ID } from "../tools.js";
 import { uninstall } from "../uninstall.js";
 import { WatchFile } from "../watch.js";
-
-export const USAGE = `rex-bot: let a coordinator bot (Grok Bot over Tailscale) see and drive your Rex agents.
-
-Install and check:
-  rex-bot setup [--yes] [--mode watched|full] [--webhook-url URL] [--webhook-key-file FILE]
-                [--webhook-header NAME] [--no-services] [--no-serve] [--no-skills] [--no-rex-config]
-                [--show-token]
-  rex-bot doctor [--json] [--test-webhook]
-  rex-bot uninstall [--yes] [--purge] [--serve-off]
-  rex-bot grokbot [--show-token]      print the Grok Bot setup text again
-  rex-bot --version                   print the installed version
-
-Settings (~/.config/rex-bot-bridge):
-  rex-bot config get <key> [--show]   keys: ${KEYS.join(", ")}
-  rex-bot config set <key> <value>    value "-" reads it from stdin (keeps secrets out of shell history)
-  rex-bot token [--rotate] [--show]   create (or rotate) the bridge's bearer token
-  rex-bot watch add|remove <session>  opt a Rex session in or out
-  rex-bot watch list
-
-For agents inside Rex:
-  rex-bot say "message"               send a message to the coordinator
-  rex-bot whoami                      print this pane's REX_SESSION and REX_BLOCK
-
-Services (run by launchd; also fine by hand):
-  rex-bot serve                       the MCP server (127.0.0.1:7400 by default)
-  rex-bot watch                       the status watcher (rex do --all lua/bot-watch.lua)
-  rex-bot notify                      internal: POST the JSON on stdin to the webhook`;
 
 const BOOL_FLAGS = [
   "yes",
@@ -60,17 +36,25 @@ const BOOL_FLAGS = [
   "no-serve",
   "no-skills",
   "no-rex-config",
+  "no-test",
   "help",
 ] as const;
+const STRING_FLAGS = ["mode", "url", "key-file", "header"] as const;
 
 function parse(argv: string[]) {
   const options: Record<string, { type: "boolean" | "string"; short?: string }> = {};
   for (const f of BOOL_FLAGS) options[f] = { type: "boolean" };
-  for (const f of ["mode", "webhook-url", "webhook-key-file", "webhook-header"]) options[f] = { type: "string" };
+  for (const f of STRING_FLAGS) options[f] = { type: "string" };
   options.yes!.short = "y";
   options.help!.short = "h";
   const { values, positionals } = parseArgs({ args: argv, options, allowPositionals: true, strict: true });
   return { flags: values as Record<string, string | boolean | undefined>, pos: positionals };
+}
+
+/** A usage error: one line plus where to look. Exit 2. */
+function usageError(msg: string, cmd?: string): number {
+  console.error(`rex-bot: ${msg}\nRun \`rex-bot ${cmd ? `${cmd} ` : ""}--help\` for usage.`);
+  return 2;
 }
 
 async function readStdin(): Promise<string> {
@@ -171,7 +155,7 @@ async function configCmd(pos: string[], show: boolean): Promise<number> {
   const v = value === "-" ? (await readStdin()).trim() : value;
   await writeSettings(ctx.paths.configFile, setKey(s, key, v));
   console.log(`${key} ${v ? "set" : "cleared"}`);
-  if (key === "port" || key === "host") console.log("Restart the bridge (re-run `rex-bot setup`) for this to take effect.");
+  if (key === "port" || key === "host") console.log("Restart the bridge for this to take effect: rex-bot setup services");
   return 0;
 }
 
@@ -199,7 +183,7 @@ async function sayCmd(text: string): Promise<number> {
   const ctx = makeCtx();
   const s = await readSettings(ctx.paths.configFile).catch(() => null);
   if (!s?.webhook.url) {
-    console.error("rex-bot: no webhook configured (rex-bot config set webhook.url …); message not sent");
+    console.error("rex-bot: no webhook configured (rex-bot setup webhook); message not sent");
     return 0;
   }
   const payload = {
@@ -235,7 +219,7 @@ async function grokbotCmd(showToken: boolean): Promise<number> {
     console.error(`no token at ${ctx.paths.tokenFile}; run \`rex-bot setup\` first`);
     return 1;
   }
-  console.log(grokbotText({ dnsName: ts.dnsName, servePath: s.servePath, token, webhookConfigured: !!s.webhook.url }));
+  console.log(connectorText({ dnsName: ts.dnsName, servePath: s.servePath, token }));
   return 0;
 }
 
@@ -245,34 +229,117 @@ export function packageVersion(): string {
   return pkg.version;
 }
 
+/** Reads --key-file: a path, or "-" for stdin. */
+async function readKeyFile(f: string): Promise<string> {
+  return (f === "-" ? await readStdin() : await readFile(f, "utf8")).trim();
+}
+
+async function setupCmd(pos: string[], flags: Record<string, string | boolean | undefined>): Promise<number> {
+  const [part, ...extra] = pos;
+  if (extra.length) return usageError(`unexpected argument: ${extra[0]}`, "setup");
+  if (part === "webhook") {
+    for (const f of ["mode", "no-services", "no-serve", "no-skills", "no-rex-config", "show-token"]) {
+      if (flags[f] !== undefined) return usageError(`--${f} is not an option of setup webhook`, "setup webhook");
+    }
+    const keyFile = flags["key-file"] as string | undefined;
+    let key: string | undefined;
+    if (keyFile !== undefined) {
+      try {
+        key = await readKeyFile(keyFile);
+      } catch (e) {
+        console.error(`rex-bot: cannot read --key-file: ${(e as NodeJS.ErrnoException).code ?? (e as Error).message}`);
+        return 1;
+      }
+    }
+    return setupWebhook(
+      makeCtx(),
+      { url: flags.url as string | undefined, key, header: flags.header as string | undefined, test: !flags["no-test"] },
+      makePrompter(!!flags.yes),
+    );
+  }
+  for (const f of ["url", "key-file", "header", "no-test"]) {
+    if (flags[f] !== undefined) return usageError(`--${f} belongs to setup webhook: rex-bot setup webhook --${f} …`, "setup webhook");
+  }
+  if (flags["show-token"]) return usageError("setup no longer prints the token; use: rex-bot grokbot --show-token", "grokbot");
+  const p = part === "skills" ? "skill" : part;
+  if (p !== undefined && !(PARTS as readonly string[]).includes(p)) {
+    return usageError(`unknown setup part: ${part} (parts: ${PARTS.join(", ")}, webhook)`, "setup");
+  }
+  const mode = flags.mode as string | undefined;
+  if (mode && !MODES.includes(mode as Mode)) return usageError(`--mode must be one of ${MODES.join(", ")}`, "setup");
+  return setup(
+    makeCtx(),
+    {
+      yes: !!flags.yes,
+      mode: mode as Mode | undefined,
+      services: !flags["no-services"],
+      serve: !flags["no-serve"],
+      skills: !flags["no-skills"],
+      rexConfig: !flags["no-rex-config"],
+    },
+    makePrompter(!!flags.yes),
+    p as Part | undefined,
+  );
+}
+
+/** "setup webhook" has its own help page; other setup parts share setup's. */
+function helpName(cmd: string, pos: string[]): string {
+  return cmd === "setup" && pos[0] === "webhook" ? "setup webhook" : cmd;
+}
+
+function printHelp(name: string): number {
+  const h = commandHelp(name);
+  if (!h) return usageError(`no help for unknown command: ${name}`);
+  console.log(h);
+  return 0;
+}
+
 export async function main(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;
-  if (!cmd || cmd === "-h" || cmd === "--help" || cmd === "help") {
-    (cmd ? console.log : console.error)(USAGE);
-    return cmd ? 0 : 2;
+  if (!cmd) {
+    console.error(TOP_HELP);
+    return 2;
+  }
+  if (cmd === "-h" || cmd === "--help") {
+    console.log(TOP_HELP);
+    return 0;
+  }
+  if (cmd === "help") {
+    if (!rest.length) {
+      console.log(TOP_HELP);
+      return 0;
+    }
+    return printHelp(helpName(rest[0]!, rest.slice(1)));
   }
   if (cmd === "-v" || cmd === "--version" || cmd === "version") {
     console.log(packageVersion());
     return 0;
   }
+  if (!commandHelp(cmd)) return usageError(`unknown command: ${cmd}`);
   // `say` takes free text (which may contain things that look like flags): no option parsing.
-  if (cmd === "say") return sayCmd(rest.join(" ").trim());
-  if (cmd === "whoami") {
-    console.log(`REX_SESSION=${process.env.REX_SESSION ?? ""}`);
-    console.log(`REX_BLOCK=${process.env.REX_BLOCK ?? ""}`);
-    if (!process.env.REX_SESSION) {
-      console.error("rex-bot: not running inside a Rex pane");
-      return 1;
-    }
-    return 0;
+  if (cmd === "say") {
+    if (rest.length === 1 && (rest[0] === "--help" || rest[0] === "-h")) return printHelp("say");
+    return sayCmd(rest.join(" ").trim());
   }
 
-  const { flags, pos } = parse(rest);
-  if (flags.help) {
-    console.log(USAGE);
-    return 0;
+  let parsed: ReturnType<typeof parse>;
+  try {
+    parsed = parse(rest);
+  } catch (e) {
+    const name = rest.find((a) => !a.startsWith("-")) === "webhook" && cmd === "setup" ? "setup webhook" : cmd;
+    return usageError((e as Error).message.split("\n")[0]!, name);
   }
+  const { flags, pos } = parsed;
+  if (flags.help) return printHelp(helpName(cmd, pos));
   switch (cmd) {
+    case "whoami":
+      console.log(`REX_SESSION=${process.env.REX_SESSION ?? ""}`);
+      console.log(`REX_BLOCK=${process.env.REX_BLOCK ?? ""}`);
+      if (!process.env.REX_SESSION) {
+        console.error("rex-bot: not running inside a Rex pane");
+        return 1;
+      }
+      return 0;
     case "serve":
       return serve();
     case "watch":
@@ -285,29 +352,8 @@ export async function main(argv: string[]): Promise<number> {
       return notifyCmd();
     case "grokbot":
       return grokbotCmd(!!flags["show-token"]);
-    case "setup": {
-      const mode = flags.mode as string | undefined;
-      if (mode && !MODES.includes(mode as Mode)) {
-        console.error(`--mode must be one of ${MODES.join(", ")}`);
-        return 2;
-      }
-      return setup(
-        makeCtx(),
-        {
-          yes: !!flags.yes,
-          mode: mode as Mode | undefined,
-          webhookUrl: flags["webhook-url"] as string | undefined,
-          webhookKeyFile: flags["webhook-key-file"] as string | undefined,
-          webhookHeader: flags["webhook-header"] as string | undefined,
-          services: !flags["no-services"],
-          serve: !flags["no-serve"],
-          skills: !flags["no-skills"],
-          rexConfig: !flags["no-rex-config"],
-          showToken: !!flags["show-token"],
-        },
-        makePrompter(!!flags.yes),
-      );
-    }
+    case "setup":
+      return setupCmd(pos, flags);
     case "doctor": {
       const checks = await runDoctor(makeCtx(), { testWebhook: !!flags["test-webhook"] });
       const ok = !checks.some((c) => c.level === "fail");
@@ -322,8 +368,7 @@ export async function main(argv: string[]): Promise<number> {
         makePrompter(!!flags.yes),
       );
     default:
-      console.error(`unknown command: ${cmd}\n\n${USAGE}`);
-      return 2;
+      return usageError(`unknown command: ${cmd}`);
   }
 }
 

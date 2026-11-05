@@ -1,6 +1,6 @@
 {
   "name": "rex-bot-bridge",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Let a coordinator bot (Grok Bot over Tailscale) see and drive the coding agents running in your Rex terminals. One-command macOS installer.",
   "keywords": [
     "rex",
@@ -36,20 +36,22 @@
     "dist",
     "lua",
     "templates",
+    "docs",
     "README.md",
     "LICENSE",
     "CHANGELOG.md"
   ],
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && chmod +x dist/cli/rex-bot.js dist/cli/bridge.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test 'test/**/*.test.ts'",
-    "prepack": "npm run build",
+    "prepare": "npm run build",
     "start": "node dist/cli/rex-bot.js serve",
     "dev": "tsx src/cli/rex-bot.ts serve",
     "e2e": "node scripts/e2e.mjs",
     "e2e:paste": "node scripts/e2e-paste.mjs",
-    "e2e:sandbox": "node scripts/e2e-sandbox.mjs"
+    "e2e:sandbox": "node scripts/e2e-sandbox.mjs",
+    "docs:commands": "tsx scripts/gen-readme-commands.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",

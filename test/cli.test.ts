@@ -134,7 +134,7 @@ test("say exits 0 with a clear message when no webhook is configured", async () 
 test("--help lists the subcommands", async () => {
   const r = await cli(rexBotCli, ["--help"], {});
   for (const c of ["setup", "doctor", "uninstall", "serve", "watch", "token", "config", "say", "whoami", "notify", "grokbot"]) {
-    assert.match(r.stdout, new RegExp(`rex-bot ${c}`));
+    assert.match(r.stdout, new RegExp(`^  ${c} `, "m"));
   }
 });
 

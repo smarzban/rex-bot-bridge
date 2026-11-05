@@ -1,12 +1,13 @@
 import { existsSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import type { Ctx } from "./context.js";
-import { LABELS, LEGACY_LABELS, serviceState } from "./launchd.js";
+import { bootstrapCommand, domain, LABELS, LEGACY_LABELS, plistPath, serviceState } from "./launchd.js";
 import { describe, enrich, postWebhook } from "./notify.js";
 import { checkConfig, inspectBlock } from "./rexconfig.js";
 import { readSettings } from "./settings.js";
 import { skillsPresent } from "./skills.js";
 import { bridgeUrl, serveArgs, serveTarget, shellCommand, tailscaleStatus } from "./tailscale.js";
+import { webhookHint } from "./webhook.js";
 
 export type Level = "ok" | "warn" | "fail";
 export interface Check {
@@ -66,7 +67,7 @@ export async function runDoctor(ctx: Ctx, opts: { testWebhook: boolean }): Promi
 
   // Token + config
   const tokenStat = await stat(paths.tokenFile).catch(() => null);
-  if (!tokenStat) add("token", "fail", `no token at ${paths.tokenFile}`, "rex-bot token");
+  if (!tokenStat) add("token", "fail", `no token at ${paths.tokenFile}`, "rex-bot token (or rex-bot setup)");
   else if ((tokenStat.mode & 0o077) !== 0) add("token", "warn", `${paths.tokenFile} is readable by others`, `chmod 600 '${paths.tokenFile}'`);
   else add("token", "ok", `${paths.tokenFile} (mode 600)`);
 
@@ -84,12 +85,12 @@ export async function runDoctor(ctx: Ctx, opts: { testWebhook: boolean }): Promi
   // init.lua
   const blk = await inspectBlock(paths.rexInitLua);
   if (blk.legacy) {
-    add("rex_actions_legacy", "warn", `${paths.rexInitLua} still defines bot_watch_toggle inline (v1)`, "Remove the old inline block, then `rex-bot setup`");
+    add("rex_actions_legacy", "warn", `${paths.rexInitLua} still defines bot_watch_toggle inline (v1)`, "Remove the old inline block, then: rex-bot setup rex");
   }
   if (!blk.present) {
-    add("rex_actions", "fail", `rex-bot-bridge block missing from ${paths.rexInitLua}`, "rex-bot setup");
+    add("rex_actions", "fail", `rex-bot-bridge block missing from ${paths.rexInitLua}`, "rex-bot setup rex");
   } else if (!blk.actionsPath || !existsSync(blk.actionsPath)) {
-    add("rex_actions", "fail", `init.lua block points at a missing file: ${blk.actionsPath ?? "?"}`, "rex-bot setup (re-points it at this install)");
+    add("rex_actions", "fail", `init.lua block points at a missing file: ${blk.actionsPath ?? "?"}`, "rex-bot setup rex (re-points it at this install)");
   } else {
     const complaint = ctx.rexBin ? await checkConfig(ctx.rex, paths.rexInitLua) : "rex not found";
     if (complaint) add("rex_actions", "fail", `rex config check failed: ${complaint}`, `Fix ${paths.rexInitLua}, then \`rex config check\``);
@@ -101,9 +102,15 @@ export async function runDoctor(ctx: Ctx, opts: { testWebhook: boolean }): Promi
     const st = await serviceState(label, ctx.launchctl);
     const id = `service_${name}`;
     if (st.running) add(id, "ok", `${label} running (pid ${st.pid ?? "?"})`);
-    else if (servicesSkipped && !st.loaded) add(id, "warn", `${label} not installed (setup --no-services)`, "rex-bot setup (without --no-services)");
-    else if (st.loaded) add(id, "fail", `${label} loaded but not running (last exit ${st.lastExit ?? "?"})`, `See ${paths.logsDir}/${name}.log`);
-    else add(id, "fail", `${label} not loaded`, "rex-bot setup");
+    else if (servicesSkipped && !st.loaded) add(id, "warn", `${label} not installed (setup --no-services)`, "rex-bot setup services");
+    else if (st.loaded)
+      add(
+        id,
+        "fail",
+        `${label} loaded but not running (last exit ${st.lastExit ?? "?"})`,
+        `See ${paths.logsDir}/${name}.log, then: launchctl kickstart -k gui/$(id -u)/${label}`,
+      );
+    else add(id, "fail", `${label} not loaded`, existsSync(plistPath(paths, label)) ? bootstrapCommand(paths, label) : "rex-bot setup services");
   }
   for (const label of LEGACY_LABELS) {
     if ((await serviceState(label, ctx.launchctl)).loaded) {
@@ -117,7 +124,7 @@ export async function runDoctor(ctx: Ctx, opts: { testWebhook: boolean }): Promi
   if (local.status === 200 && local.body?.ok) {
     add("bridge_local", local.body.rex_reachable ? "ok" : "warn", `bridge /healthz on ${s.host}:${s.port}: rex_reachable=${local.body.rex_reachable}`);
   } else {
-    add("bridge_local", bridgeLevel, `bridge not answering on ${s.host}:${s.port} (${local.error ?? `HTTP ${local.status}`})`, servicesSkipped ? "rex-bot serve" : `See ${paths.logsDir}/bridge.log`);
+    add("bridge_local", bridgeLevel, `bridge not answering on ${s.host}:${s.port} (${local.error ?? `HTTP ${local.status}`})`, servicesSkipped ? "rex-bot serve (or: rex-bot setup services)" : `See ${paths.logsDir}/bridge.log, then: launchctl kickstart -k ${domain()}/${LABELS.bridge}`);
   }
 
   // Watcher heartbeat
@@ -129,13 +136,13 @@ export async function runDoctor(ctx: Ctx, opts: { testWebhook: boolean }): Promi
     /* none */
   }
   if (age !== null && age < HEARTBEAT_MAX_S) add("watcher", "ok", `watcher heartbeat ${age}s ago`);
-  else add("watcher", bridgeLevel, age === null ? "no watcher heartbeat yet" : `watcher heartbeat is ${age}s old`, servicesSkipped ? "rex-bot watch" : `See ${paths.logsDir}/watch.log`);
+  else add("watcher", bridgeLevel, age === null ? "no watcher heartbeat yet" : `watcher heartbeat is ${age}s old`, servicesSkipped ? "rex-bot watch (or: rex-bot setup services)" : `See ${paths.logsDir}/watch.log, then: launchctl kickstart -k ${domain()}/${LABELS.watch}`);
 
   // Tailscale
   const ts = await tailscaleStatus(ctx.tailscale);
   const tsLevel: Level = serveSkipped ? "warn" : "fail";
   const serveCmd = shellCommand("tailscale", serveArgs(s.servePath, s.port));
-  if (!ctx.tailscaleBin) add("tailscale", tsLevel, "tailscale CLI not found", "Install Tailscale");
+  if (!ctx.tailscaleBin) add("tailscale", tsLevel, "tailscale CLI not found", "Install Tailscale (https://tailscale.com/download)");
   else if (!ts.running) add("tailscale", tsLevel, `Tailscale not running (${ts.backendState ?? "unknown"})`, "Open Tailscale and log in");
   else add("tailscale", "ok", `Tailscale up as ${ts.dnsName}`);
 
@@ -154,7 +161,7 @@ export async function runDoctor(ctx: Ctx, opts: { testWebhook: boolean }): Promi
           "bridge_tailnet",
           remote.status === 502 ? bridgeLevel : "fail",
           `tailnet /healthz failed (${remote.error ?? `HTTP ${remote.status}`})`,
-          remote.status === 502 ? "502 means the bridge is down: check the bridge service" : "tailscale serve status",
+          remote.status === 502 ? `502 means the bridge is down: launchctl kickstart -k ${domain()}/${LABELS.bridge}` : "tailscale serve status",
         );
     } else {
       const what =
@@ -169,18 +176,18 @@ export async function runDoctor(ctx: Ctx, opts: { testWebhook: boolean }): Promi
 
   // Webhook
   if (!s.webhook.url) {
-    add("webhook", "warn", "webhook not configured: status pushes and `rex-bot say` go nowhere", "rex-bot config set webhook.url '<routine webhook url>'");
+    add("webhook", "warn", "webhook not configured: status pushes and `rex-bot say` go nowhere", "rex-bot setup webhook");
   } else {
     add("webhook", "ok", `webhook configured${s.webhook.key ? ` (key in ${s.webhook.header ?? "Authorization"})` : " (no key)"}`);
     if (opts.testWebhook) {
       const r = await postWebhook(s.webhook, enrich({ event: "doctor_test" }), { logFile: paths.notifyLog, fetch: ctx.fetch });
-      add("webhook_test", r.ok ? "ok" : "fail", `doctor_test sent: ${describe(r)}`, r.ok ? undefined : "Check the routine's webhook URL/key: rex-bot config set webhook.url …");
+      add("webhook_test", r.ok ? "ok" : "fail", `doctor_test sent: ${describe(r)}`, r.ok ? undefined : webhookHint(r));
     }
   }
 
   // Skills (informational)
   const skills = await skillsPresent(paths.skillRoots);
-  add("skills", skills.length ? "ok" : "warn", skills.length ? `agent skill installed: ${skills.join(", ")}` : "agent skill not installed", skills.length ? undefined : "rex-bot setup");
+  add("skills", skills.length ? "ok" : "warn", skills.length ? `agent skill installed: ${skills.join(", ")}` : "agent skill not installed", skills.length ? undefined : "rex-bot setup skill");
 
   return checks;
 }
