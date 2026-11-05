@@ -5,9 +5,9 @@ import { join } from "node:path";
 import { isEphemeralInstall, isSandboxHome, type Ctx } from "./context.js";
 import { grokbotText } from "./grokbot.js";
 import { installServices, LEGACY_LABELS, serviceState } from "./launchd.js";
-import type { Prompter } from "./prompt.js";
+import { MAX_TRIES, type Prompter } from "./prompt.js";
 import { installBlock } from "./rexconfig.js";
-import { ensurePrivateDir, MODES, readSettings, setKey, settingsExist, writeSettings, type Mode } from "./settings.js";
+import { ensurePrivateDir, MODES, readSettings, setKey, settingsExist, writeSettings, type Mode, type Settings } from "./settings.js";
 import { installSkills } from "./skills.js";
 import { serveArgs, servesDesired, serveTarget, shellCommand, tailscaleStatus } from "./tailscale.js";
 import { ensureToken } from "./token.js";
@@ -64,6 +64,133 @@ export async function migrateWatched(legacyFile: string, watchedFile: string): P
   const added: string[] = [];
   for (const id of parseWatched(content)) if (await watch.add(id)) added.push(id);
   return added;
+}
+
+/** Strips a leading `Bearer ` from a key value. */
+function stripBearer(v: string): string {
+  return v.trim().replace(/^bearer(\s+|$)/i, "").trim();
+}
+
+const HEADER_NAME = /^[A-Za-z0-9-]+$/;
+
+/**
+ * Reads the (hidden) key answer. A pasted header line gives the header name and the key; a leading
+ * `Bearer ` is stripped either way. It counts as a header line when there's a space after the colon
+ * (`X-Key: v`), the name is Authorization (`Authorization:Bearer v`), or nothing follows the colon
+ * (`X-Key:`, which is an error: no key). Otherwise, e.g. a bare `abc:def`, it's the key as typed.
+ */
+export function parseKeyAnswer(a: string): { key: string; header?: string } | { error: string } {
+  const t = a.trim();
+  const m = /^([A-Za-z0-9-]+):(\s*)(.*)$/.exec(t);
+  if (m && (m[2] || !m[3] || m[1]!.toLowerCase() === "authorization")) {
+    const key = stripBearer(m[3]!);
+    if (!key) return { error: "That header line has no key after the colon." };
+    return { header: m[1]!, key };
+  }
+  return { key: stripBearer(t) };
+}
+
+/**
+ * Reads a header answer. A pasted full header line (`Name: value`) gives the name, and its value
+ * (minus any `Bearer `) becomes the key. Returns an error reason (never echoing the answer) when
+ * the name isn't a header name.
+ */
+export function parseHeaderAnswer(a: string, key: string): { header: string; key: string } | { error: string } {
+  let name = a.trim() || "Authorization";
+  const m = /^([^:\s]+)\s*:\s*(.*)$/.exec(name);
+  if (m) {
+    name = m[1]!;
+    const v = stripBearer(m[2]!);
+    if (v) key = v;
+  }
+  if (!HEADER_NAME.test(name)) return { error: "a header name is letters, digits and dashes only, e.g. X-Webhook-Key" };
+  return { header: name, key };
+}
+
+/** Asks until `check` passes (it returns an error reason, or nothing); undefined after MAX_TRIES bad answers. */
+async function askValid(
+  p: Prompter,
+  question: string,
+  check: (a: string) => string | undefined,
+  say: (s: string) => void,
+  opts: { secret?: boolean } = {},
+): Promise<string | undefined> {
+  for (let tries = 1; tries <= MAX_TRIES; tries++) {
+    const a = await p.ask(question, opts);
+    const reason = check(a);
+    if (!reason) return a;
+    say(`   ${reason}${tries < MAX_TRIES ? " Try again." : ""}`);
+  }
+  return undefined;
+}
+
+export const KEY_QUESTION = "Webhook key (Enter if none; input hidden)";
+export const HEADER_QUESTION =
+  "Header name for the key [Authorization] (just the name, e.g. X-Webhook-Key; Enter for Authorization: Bearer <key>; input hidden)";
+
+/** Interactive webhook questions: URL, then the key (hidden), then the header name (only with a key). */
+async function askWebhook(s: Settings, p: Prompter, say: (s: string) => void, warn: (s: string) => void): Promise<Settings> {
+  const url = await askValid(
+    p,
+    "Webhook URL (Enter to skip and set it later)",
+    (a) => (!a || /^https:\/\/\S+$/.test(a) ? undefined : "The webhook URL must start with https://."),
+    say,
+  );
+  if (url === undefined) {
+    warn(`No valid webhook URL after ${MAX_TRIES} tries; skipped.`);
+    return s;
+  }
+  if (!url) return s;
+  s = setKey(s, "webhook.url", url);
+
+  let k: { key: string; header?: string } | undefined;
+  const keyAnswer = await askValid(
+    p,
+    KEY_QUESTION,
+    (a) => {
+      const r = parseKeyAnswer(a);
+      if ("error" in r) return r.error;
+      k = r;
+      return undefined;
+    },
+    say,
+    { secret: true },
+  );
+  if (keyAnswer === undefined || !k) {
+    warn(`No valid webhook key after ${MAX_TRIES} tries; saved the URL without a key. Add it later: rex-bot config set webhook.key -`);
+    return s;
+  }
+  if (!k.key) return s;
+  let key = k.key;
+  let header = k.header;
+
+  if (!header) {
+    // Hidden too: people paste a whole `Name: value` header line here, value and all.
+    let parsed: { header: string; key: string } | undefined;
+    await askValid(
+      p,
+      HEADER_QUESTION,
+      (a) => {
+        const r = parseHeaderAnswer(a, key);
+        if ("error" in r) return `That isn't a header name: ${r.error}.`;
+        parsed = r;
+        return undefined;
+      },
+      say,
+      { secret: true },
+    );
+    if (parsed) {
+      key = parsed.key;
+      header = parsed.header;
+    } else {
+      warn(`No valid header name after ${MAX_TRIES} tries; the key will be sent as Authorization: Bearer <key>. Change it later: rex-bot config set webhook.header <name>`);
+    }
+  }
+  if (header && HEADER_NAME.test(header)) {
+    say(`   Header: ${header}`); // the name only, never the value
+    if (header.toLowerCase() !== "authorization") s = setKey(s, "webhook.header", header);
+  }
+  return setKey(s, "webhook.key", key);
 }
 
 export async function setup(ctx: Ctx, flags: SetupFlags, p: Prompter): Promise<number> {
@@ -131,13 +258,8 @@ export async function setup(ctx: Ctx, flags: SetupFlags, p: Prompter): Promise<n
   if (flags.mode) {
     s.mode = flags.mode;
   } else if (!hadSettings) {
-    const v1 = existsSync(paths.legacyWatchedFile);
     say("\n" + MODE_HELP);
-    if (v1) say("  (Your v1 setup gave the bot full powers. Choose full to keep that.)");
     s.mode = await p.choose("Mode", MODES, "watched");
-    if (v1 && !p.interactive && s.mode === "watched") {
-      warn('v1 gave the bot full powers; this install defaults to "watched". Run `rex-bot config set mode full` to keep v1 behaviour.');
-    }
   }
   ok(`Mode: ${s.mode}${hadSettings && !flags.mode ? " (kept)" : ""}`);
 
@@ -147,15 +269,11 @@ export async function setup(ctx: Ctx, flags: SetupFlags, p: Prompter): Promise<n
   if (flags.webhookHeader) s = setKey(s, "webhook.header", flags.webhookHeader);
   if (!s.webhook.url && p.interactive) {
     say("\nThe watcher and `rex-bot say` POST to a Grok Bot routine's webhook (see the Grok Bot text at the end).");
-    const url = await p.ask("Webhook URL (Enter to skip and set it later)");
-    if (url) {
-      s = setKey(s, "webhook.url", url);
-      const key = await p.ask("Webhook key (Enter if none; input hidden)", { secret: true });
-      if (key) {
-        s = setKey(s, "webhook.key", key);
-        const header = await p.ask("Header for the key", { def: "Authorization" });
-        if (header && header !== "Authorization") s = setKey(s, "webhook.header", header);
-      }
+    try {
+      s = await askWebhook(s, p, say, warn);
+    } catch (e) {
+      // Never lose the rest of setup over one answer.
+      warn(`Webhook setup skipped (${(e as Error).message}). Set it later: rex-bot config set webhook.url '<url>'`);
     }
   }
   s.skipped = { services: !flags.services, serve: !flags.serve };
