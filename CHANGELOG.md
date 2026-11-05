@@ -18,6 +18,13 @@ One-command installer for other people (macOS).
   v1 opt-in list from `~/.config/rex/bot-watch/sessions` and leaves the old file in place.
 - `rex-bot` gained `setup`, `doctor`, `uninstall`, `serve`, `watch`, `token`, `config`, `notify`, `grokbot`.
   `rex-bot-bridge serve|token` still work.
+- Watched mode hardening: `spawn_agent` never (re-)adds an existing session (only a new one is auto-watched);
+  `wait_for_status` rechecks access before every poll; the watcher rechecks the opt-in list before sending; the
+  bridge never defaults to `full`.
+- Setup never replaces a Tailscale Serve path that holds any other handler, or whose status it can't read,
+  without an explicit yes (`--yes` leaves it alone). `init.lua` is also restored when `rex config check` times
+  out or can't start.
+- State files (`watched`, `heartbeat`) are created 0600. The palette actions show an alert with the result.
 - MIT licence; package ready for npm (`files` whitelist, `engines`, `os`).
 
 ## 0.1.0

@@ -25,7 +25,7 @@ macOS only. Both directions live in this one package; `rex-bot setup` installs t
 | `watched` (default) | List every session. Read, type into, press keys in, wait on, and close panes **only in sessions you opted in**. Spawn agents into a watched session or a new session (which is then watched). It cannot opt sessions in itself. |
 | `full` | All of the above in **every** Rex session. |
 
-Opt a session in from Rex's command palette (**Bot: Watch / Unwatch This Session**) or with `rex-bot watch add <session-id>`. Switch modes with `rex-bot config set mode watched|full` (takes effect on the next call, no restart).
+Opt a session in from Rex's command palette (**Bot: Watch / Unwatch This Session**; an alert confirms it, and **Bot: List Watched Sessions** shows the list) or with `rex-bot watch add <session-id>`. Switch modes with `rex-bot config set mode watched|full` (takes effect on the next call, no restart).
 
 Other protections:
 
@@ -107,7 +107,7 @@ Install from the global npm prefix, not `npx`: the services point at the install
 | `read_pane` | `block_id`, `session_id?`, `lines=80` | Tail of the pane's screen and scrollback (untrusted text) |
 | `send_message` | `block_id`, `session_id?`, `text`, `submit=true`, `require_idle=false` | Pastes text, then Enter |
 | `send_keys` | `block_id`, `session_id?`, `keys[]` | e.g. `["escape"]`, `["ctrl+c"]`, `["1","enter"]` |
-| `spawn_agent` | `agent`, `cwd`, `prompt?`, `session_id?` \| `new_session_label?`, `label?`, `command?`, `watch=true` | New tab in a session, or a new session |
+| `spawn_agent` | `agent`, `cwd`, `prompt?`, `session_id?` \| `new_session_label?`, `label?`, `command?`, `watch=true` | New tab in a session, or a new session (`watch` applies in full mode; in watched mode only a new session is added) |
 | `wait_for_status` | `block_id`, `session_id?`, `states`, `timeout_s=120` | Polls program status |
 | `close_pane` / `close_session` | ids | Close a pane / kill a session |
 | `watch_session` / `unwatch_session` | `session_id` | Edit the opt-in list (`watch_session` only in full mode) |

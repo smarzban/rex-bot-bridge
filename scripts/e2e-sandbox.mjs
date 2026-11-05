@@ -142,6 +142,8 @@ try {
     hb = await readFile(join(stateDir, "heartbeat"), "utf8").catch(() => null);
   }
   check(!!hb, "watcher wrote its heartbeat in the sandbox");
+  const hbMode = (await stat(join(stateDir, "heartbeat")).catch(() => null))?.mode & 0o777;
+  check(hbMode === 0o600, `heartbeat is 0600 (got ${hbMode?.toString(8)})`);
 
   const doc2 = JSON.parse((await cli(["doctor", "--json", "--test-webhook"])).stdout);
   const l2 = Object.fromEntries(doc2.checks.map((c) => [c.id, c.level]));
@@ -162,6 +164,8 @@ try {
   const otherS = await mk(`e2e-sandbox-${tag}-other`);
   const add = await cli(["watch", "add", watchedS.session_id]);
   check(add.stdout.startsWith("watching"), `rex-bot watch add: ${add.stdout.trim()}`);
+  const wMode = (await stat(join(stateDir, "watched")).catch(() => null))?.mode & 0o777;
+  check(wMode === 0o600, `watched is 0600 (got ${wMode?.toString(8)})`);
   await sleep(1500); // let the shells start
 
   client = new Client({ name: "e2e-sandbox", version: "0" });
@@ -208,6 +212,14 @@ try {
   check(msg?.body.text === "hello from the sandbox" && msg.body.rex_session === watchedS.session_id, "sink got agent_message");
   const notifyLog = await readFile(join(SB, "Library/Logs/rex-bot-bridge/notify.log"), "utf8").catch(() => "");
   check(notifyLog.includes("http=200") && !notifyLog.includes(KEY) && !notifyLog.includes("e2e-sink-path"), "notify.log has status codes only");
+
+  // Unwatched during the watcher's debounce: nothing is sent.
+  const t0 = Date.now();
+  await run(REX, ["send", "-s", watchedS.session_id, "-b", watchedS.block_id, "--", "printf '\\033]7501;state=blocked:app=e2e-debounce\\033\\\\'\n"]);
+  const rm = await cli(["watch", "remove", watchedS.session_id]);
+  check(rm.stdout.startsWith("no longer watching") && Date.now() - t0 < 2500, `unwatched within the 3s debounce (${Date.now() - t0}ms): ${rm.stdout.trim()}`);
+  await sleep(6000);
+  check(!received.some((r) => r.body?.app === "e2e-debounce"), "no agent_status after the session was unwatched mid-debounce");
 } catch (e) {
   failures++;
   console.log(`FAIL: ${e.stack || e}`);

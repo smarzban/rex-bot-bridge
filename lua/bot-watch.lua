@@ -103,9 +103,16 @@ rex.on("terminal.program_status_changed", function(ctx, ev)
     cwd = cwd,
     updated_at = rec.updated_at,
   }
+  local sid = ctx.session_id
   timers[key] = rex.after(DEBOUNCE, function()
     timers[key] = nil
-    if last[key] == state then send(payload) end
+    if last[key] ~= state then return end
+    -- The human may have unwatched the session during the debounce.
+    if not watched(sid) then
+      print(os.date("!%Y-%m-%dT%H:%M:%SZ") .. " " .. state .. " " .. payload.rex_block .. " skipped: session no longer watched")
+      return
+    end
+    send(payload)
   end)
 end)
 
@@ -128,9 +135,15 @@ rex.on("block_closed", function(ctx, ev)
 end)
 
 -- Heartbeat so `rex-bot doctor` and the bridge's /healthz can tell the watcher is alive.
+-- Written to a 0600 temp file (chmod before any content), then renamed over the old one.
 local function beat()
-  local f = io.open(HEARTBEAT_FILE, "w")
-  if f then f:write(os.date("!%Y-%m-%dT%H:%M:%SZ"), "\n"); f:close() end
+  local tmp = HEARTBEAT_FILE .. ".tmp"
+  local f = io.open(tmp, "w")
+  if not f then return end
+  local r = rex.exec({ "/bin/chmod", "600", tmp })
+  if not r or r.code ~= 0 then f:close(); os.remove(tmp); return end
+  f:write(os.date("!%Y-%m-%dT%H:%M:%SZ"), "\n"); f:close()
+  os.rename(tmp, HEARTBEAT_FILE)
 end
 beat()
 rex.every(60, beat)
