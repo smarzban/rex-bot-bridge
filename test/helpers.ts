@@ -6,6 +6,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { AuditLog } from "../src/audit.js";
 import { Ops } from "../src/ops.js";
+import type { Ctx } from "../src/context.js";
+import { resolvePaths } from "../src/paths.js";
 import { Rex, type RunOptions, type RunResult } from "../src/rex.js";
 import { createBridgeHttpServer } from "../src/server.js";
 import { WatchFile } from "../src/watch.js";
@@ -151,4 +153,52 @@ export async function call(client: Client, name: string, args: Record<string, un
     /* error text */
   }
   return { isError: !!r.isError, text, json };
+}
+
+const ROOT = join(import.meta.dirname, "..");
+const ok = (stdout = ""): RunResult => ({ stdout, stderr: "", code: 0 });
+
+export interface FakeEnv {
+  ctx: Ctx;
+  out: string[];
+  tsCalls: string[][];
+  launchctlCalls: string[][];
+}
+
+/** A setup/uninstall Ctx with fake rex/launchctl/tailscale and HOME in a temp dir; out collects stdout+stderr. */
+export async function fakeCtx(serveStatus: RunResult | Error, home?: string): Promise<FakeEnv> {
+  home ??= await tempDir();
+  const out: string[] = [];
+  const tsCalls: string[][] = [];
+  const launchctlCalls: string[][] = [];
+  const fake = new FakeRex();
+  const ctx: Ctx = {
+    env: { HOME: home },
+    paths: resolvePaths({ HOME: home }),
+    pkgRoot: ROOT,
+    cli: join(ROOT, "package.json"),
+    node: process.execPath,
+    rexBin: "/fake/rex",
+    rex: async (args, opts) => (args[0] === "config" ? ok() : fake.runner(args, opts)),
+    launchctl: async (args) => {
+      launchctlCalls.push(args);
+      return { stdout: "", stderr: "not loaded", code: 113 };
+    },
+    tailscaleBin: "/fake/tailscale",
+    tailscale: async (args) => {
+      tsCalls.push(args);
+      if (args[0] === "status") return ok(JSON.stringify({ BackendState: "Running", Self: { DNSName: "mac.tail.ts.net." } }));
+      if (args[0] === "serve" && args[1] === "status") {
+        if (serveStatus instanceof Error) throw serveStatus;
+        return serveStatus;
+      }
+      return ok();
+    },
+    fetch: (async () => {
+      throw new Error("no network in tests");
+    }) as unknown as typeof fetch,
+    out: (s) => out.push(s),
+    err: (s) => out.push(s),
+  };
+  return { ctx, out, tsCalls, launchctlCalls };
 }

@@ -20,7 +20,7 @@ import { uninstall } from "../src/uninstall.js";
 import { runDoctor } from "../src/doctor.js";
 import { readSettings } from "../src/settings.js";
 import { WatchFile } from "../src/watch.js";
-import { B1, B3, FakeRex, S1, S2, tempDir } from "./helpers.js";
+import { B1, B3, fakeCtx, FakeRex, S1, S2, tempDir } from "./helpers.js";
 
 const ROOT = join(import.meta.dirname, "..");
 const ok = (stdout = ""): RunResult => ({ stdout, stderr: "", code: 0 });
@@ -197,50 +197,6 @@ test("K4/R3: watched is created 0600 (even with umask 0) and a looser existing f
 });
 
 // ---------- K2 + K8: setup/uninstall through a fake ctx ----------
-
-interface FakeEnv {
-  ctx: Ctx;
-  out: string[];
-  tsCalls: string[][];
-  launchctlCalls: string[][];
-}
-
-async function fakeCtx(serveStatus: RunResult | Error, home?: string): Promise<FakeEnv> {
-  home ??= await tempDir();
-  const out: string[] = [];
-  const tsCalls: string[][] = [];
-  const launchctlCalls: string[][] = [];
-  const fake = new FakeRex();
-  const ctx: Ctx = {
-    env: { HOME: home },
-    paths: resolvePaths({ HOME: home }),
-    pkgRoot: ROOT,
-    cli: join(ROOT, "package.json"),
-    node: process.execPath,
-    rexBin: "/fake/rex",
-    rex: async (args, opts) => (args[0] === "config" ? ok() : fake.runner(args, opts)),
-    launchctl: async (args) => {
-      launchctlCalls.push(args);
-      return { stdout: "", stderr: "not loaded", code: 113 };
-    },
-    tailscaleBin: "/fake/tailscale",
-    tailscale: async (args) => {
-      tsCalls.push(args);
-      if (args[0] === "status") return ok(JSON.stringify({ BackendState: "Running", Self: { DNSName: "mac.tail.ts.net." } }));
-      if (args[0] === "serve" && args[1] === "status") {
-        if (serveStatus instanceof Error) throw serveStatus;
-        return serveStatus;
-      }
-      return ok();
-    },
-    fetch: (async () => {
-      throw new Error("no network in tests");
-    }) as unknown as typeof fetch,
-    out: (s) => out.push(s),
-    err: (s) => out.push(s),
-  };
-  return { ctx, out, tsCalls, launchctlCalls };
-}
 
 const FLAGS: SetupFlags = {
   yes: false,
