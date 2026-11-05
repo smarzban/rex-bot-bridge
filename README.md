@@ -38,64 +38,66 @@ Other protections:
 
 ## Prerequisites
 
-- macOS with **Node 22+**
+- macOS with **Node 22+** (`brew install node`)
 - **Rex**, running, with `rex` on your PATH (`command -v rex`)
-- **Tailscale**, logged in on this Mac
-- **Grok Bot** desktop with its Tailscale plugin
+- **Tailscale**, logged in on this Mac, with **HTTPS certificates enabled for the tailnet** (admin console → DNS → MagicDNS + HTTPS)
+- **Grok Bot** desktop
 
 ## Quickstart
 
-```sh
-npm i -g rex-bot-bridge
-rex-bot setup
-rex-bot doctor
-```
+1. **Grok Bot's Tailscale plugin:** Grok Bot desktop → Connect apps → Your plugins → Tailscale → Authenticate (same tailnet as this Mac).
+2. **Install:**
 
-`setup` asks a few questions (mode, webhook, whether to run `tailscale serve`) and then:
+   ```sh
+   curl -fsSL https://raw.githubusercontent.com/smarzban/rex-bot-bridge/main/install.sh | sh
+   ```
 
-1. creates the token and `~/.config/rex-bot-bridge/` (700; files 600),
-2. adds the palette actions to Rex's `init.lua` as one marked block (backed up first, validated with `rex config check`, rolled back if the check fails),
-3. installs and starts the launchd services `com.rexbotbridge.bridge` and `com.rexbotbridge.watch`,
-4. runs `tailscale serve --bg --https=443 --set-path /rex-bridge http://127.0.0.1:7400` (after asking),
-5. installs a small `rex-bot` skill into `~/.claude/skills` and `~/.agents/skills` (if those exist) so agents know about `rex-bot say`,
-6. prints the Grok Bot setup text.
+   Read the script first if you like: <https://raw.githubusercontent.com/smarzban/rex-bot-bridge/main/install.sh>. It checks macOS, Node and npm, installs the `rex-bot` CLI with npm (never sudo), and offers to run `rex-bot setup`. Re-run it to upgrade.
+   Or install with npm yourself: `npm i -g github:smarzban/rex-bot-bridge` (`npm i -g rex-bot-bridge` once it's on npm).
+3. **Set up this Mac:** `rex-bot setup` (the installer offers to run it).
+4. **Set up Grok Bot:** follow [docs/grok-bot.md](docs/grok-bot.md): the connector and the routine. You can also give your Grok Bot that page's raw address: `https://raw.githubusercontent.com/smarzban/rex-bot-bridge/main/docs/grok-bot.md`.
+5. **Give the routine's webhook to this Mac:** `rex-bot setup webhook`
+6. **Check everything:** `rex-bot doctor --test-webhook`
 
-Install from the global npm prefix, not `npx`: the services point at the installed files.
+`rex-bot setup` asks one question on a first run (the mode) and a yes/no before `tailscale serve`, then prints numbered sections:
 
-**Non-interactive:** `rex-bot setup --yes [--mode watched|full] [--webhook-url URL] [--webhook-key-file FILE] [--webhook-header NAME] [--no-services] [--no-serve] [--no-skills] [--no-rex-config] [--show-token]`. With `--yes`, nothing on Tailscale Serve is overwritten and the token is not shown.
+1. **Checks:** Node, Rex and the Rex server.
+2. **Settings:** creates the token and `~/.config/rex-bot-bridge/` (700; files 600), sets the mode.
+3. **Rex palette** (`setup rex`): adds the palette actions to Rex's `init.lua` as one marked block (backed up first, validated with `rex config check`, rolled back if the check fails).
+4. **Services** (`setup services`): installs and starts the launchd services `com.rexbotbridge.bridge` and `com.rexbotbridge.watch`.
+5. **Tailscale Serve** (`setup serve`): runs `tailscale serve --bg --https=443 --set-path /rex-bridge http://127.0.0.1:7400` (after asking).
+6. **Agent skill** (`setup skill`): installs a small `rex-bot` skill into `~/.claude/skills` and `~/.agents/skills` (if those exist) so agents know about `rex-bot say`.
+
+Each line is ✅, ⚠️ or ❌, and every ⚠️/❌ has a `fix:` line. It ends with **Next**: the Grok Bot guide, `rex-bot setup webhook`, and `rex-bot doctor --test-webhook`. Each part re-runs on its own, e.g. `rex-bot setup services`.
+
+Install globally, not with `npx`: the services point at the installed files.
+
+**Non-interactive:** `rex-bot setup --yes [--mode watched|full] [--no-rex-config] [--no-services] [--no-serve] [--no-skills]`, then `rex-bot setup webhook --url URL --key-file FILE --yes`. With `--yes`, nothing on Tailscale Serve is overwritten.
 
 ## Grok Bot setup
 
-`rex-bot grokbot` prints this with your URL filled in (`--show-token` fills in the token too):
-
-1. **Tailscale plugin:** Grok Bot desktop → Connect apps → Your plugins → Tailscale → Authenticate (your personal tailnet).
-2. **Connector:** ask Grok Bot in chat to add a custom MCP connector named `rex` with URL `https://<your-mac>.<tailnet>.ts.net/rex-bridge/mcp`, Streamable HTTP, header `Authorization: Bearer <token>` (static header, not OAuth).
-3. **Routine:** create a routine with a **Webhook** trigger and the `rex` connector, paste the instructions `rex-bot grokbot` prints (they cover `agent_status`, `agent_message`, when to approve permission prompts, and never pasting secrets), then give its webhook to rex-bot:
-
-   ```sh
-   rex-bot config set webhook.url '<routine webhook url>'
-   rex-bot config set webhook.key -            # reads the key from stdin; skip if there is none
-   rex-bot config set webhook.header X-Key     # only if the key goes in a header other than Authorization
-   rex-bot doctor --test-webhook
-   ```
-
-   `Authorization` keys are sent as `Bearer <key>`; any other header gets the raw key.
+See **[docs/grok-bot.md](docs/grok-bot.md)**: the Tailscale plugin, the `rex` connector (`rex-bot grokbot --show-token` prints the message to paste), the routine and its instructions, the webhook, and troubleshooting. Webhook keys for `Authorization` are sent as `Bearer <key>`; any other header gets the raw key.
 
 ## Commands
 
+Run `rex-bot --help`, or `rex-bot help <command>` / `rex-bot <command> --help` for usage, options, examples and exit codes. This table is generated from that help text (`npm run docs:commands`):
+
+<!-- commands:start (generated by npm run docs:commands; edit src/cli/help.ts) -->
 | Command | Does |
 |---|---|
-| `rex-bot setup` | Install or repair everything (safe to re-run; keeps your mode and webhook) |
-| `rex-bot doctor [--json] [--test-webhook]` | Check the whole chain; exits 1 on any ❌ |
-| `rex-bot uninstall [--yes] [--purge] [--serve-off]` | Remove services, the init.lua block and the skill. Keeps `~/.config/rex-bot-bridge` unless `--purge`; asks before removing the Tailscale Serve mapping |
-| `rex-bot grokbot [--show-token]` | Print the Grok Bot setup text again |
-| `rex-bot config get\|set <key> [value]` | `mode`, `port`, `host`, `servePath`, `webhook.url`, `webhook.key`, `webhook.header` (secrets hidden unless `get --show`) |
-| `rex-bot token [--rotate] [--show]` | Create or rotate the bearer token |
-| `rex-bot watch add\|remove <session>` / `watch list` | Opt sessions in or out |
-| `rex-bot say "message"` | From an agent: message the bot (always exits 0) |
-| `rex-bot whoami` | Print this pane's `REX_SESSION` / `REX_BLOCK` |
-| `rex-bot serve` / `rex-bot watch` | The two services (launchd runs them; fine by hand too) |
-| `rex-bot notify` | Internal: POST the JSON on stdin to the webhook |
+| `rex-bot setup [--yes] [--mode watched\|full] [--no-rex-config] [--no-services] [--no-serve] [--no-skills]`<br>`rex-bot setup rex \| services \| serve \| skill [--yes]`<br>`rex-bot setup webhook [--url URL] [--key-file FILE\|-] [--header NAME] [--yes] [--no-test]` | install or repair everything (or one part); setup webhook adds the routine's webhook (`rex-bot help setup`) |
+| `rex-bot setup webhook [--url URL] [--key-file FILE\|-] [--header NAME] [--yes] [--no-test]` | save the Grok Bot routine's webhook (URL, key, header) and send a test (`rex-bot help setup webhook`) |
+| `rex-bot doctor [--json] [--test-webhook]` | check the whole chain; every problem comes with a fix line (`rex-bot help doctor`) |
+| `rex-bot grokbot [--show-token]` | print the message that adds this Mac as a Grok Bot connector (`rex-bot help grokbot`) |
+| `rex-bot uninstall [--yes] [--purge] [--serve-off]` | remove the services, palette actions and skill (`rex-bot help uninstall`) |
+| `rex-bot config get <key> [--show]`<br>`rex-bot config set <key> <value>` | read or change one setting in config.json (`rex-bot help config`) |
+| `rex-bot token [--rotate] [--show]` | create (or rotate) the bridge's bearer token (`rex-bot help token`) |
+| `rex-bot watch add <session>`<br>`rex-bot watch remove <session>`<br>`rex-bot watch list`<br>`rex-bot watch` | opt a Rex session in or out of the bot (watched mode); bare: run the watcher (`rex-bot help watch`) |
+| `rex-bot say "message"` | from an agent: send a message to the coordinator bot (`rex-bot help say`) |
+| `rex-bot whoami` | print this pane's REX_SESSION and REX_BLOCK (`rex-bot help whoami`) |
+| `rex-bot serve` | run the MCP bridge (127.0.0.1:7400 by default) (`rex-bot help serve`) |
+| `rex-bot notify < event.json` | internal: POST the JSON on stdin to the webhook (`rex-bot help notify`) |
+<!-- commands:end -->
 
 `rex-bot-bridge serve` and `rex-bot-bridge token` still work (v1 names).
 
@@ -119,19 +121,20 @@ Program status comes from OSC 7501, which Claude Code and Pi report natively. Fo
 
 | Path | What |
 |---|---|
-| `~/.config/rex-bot-bridge/` | `token`, `config.json`, `watched` (opt-in list), `heartbeat`, `init-backups/` |
+| `~/.config/rex-bot-bridge/` | `token`, `config.json`, `watched` (opt-in list), `heartbeat` |
+| `~/.config/rex/rex-bot-backups/` | `init.lua` backups (next to `init.lua`; kept by `uninstall --purge`) |
 | `~/Library/LaunchAgents/com.rexbotbridge.{bridge,watch}.plist` | The services |
 | `~/Library/Logs/rex-bot-bridge/` | `bridge.log`, `watch.log`, `notify.log` |
 | `~/.local/state/rex-bot-bridge/audit.log` | Tool-call audit log |
 | Rex `init.lua` | One block between `-- >>> rex-bot-bridge >>>` and `-- <<< rex-bot-bridge <<<` |
 
-Upgrading from v1: `setup` imports your old opt-in list from `~/.config/rex/bot-watch/sessions` (and leaves the file there), offers `full` mode to keep v1 behaviour, and tells you to stop the old `com.rex.bot-*` services or hand-started `rex-bridge` / `bot-watch` sessions. If your `init.lua` defines `bot_watch_toggle` inline, remove that block by hand and re-run `setup`.
+Upgrading from v1: `setup` imports your old opt-in list from `~/.config/rex/bot-watch/sessions` (and leaves the file there), offers `full` mode to keep v1 behaviour, and tells you to stop the old `com.rex.bot-*` services or hand-started `rex-bridge` / `bot-watch` sessions. If your `init.lua` defines `bot_watch_toggle` inline, remove that block by hand and run `rex-bot setup rex`.
 
 ## Troubleshooting
 
 Run `rex-bot doctor` first; every ❌ comes with a fix line.
 
-- **The bot gets HTTP 502:** Tailscale reached your Mac but the bridge is down. Check `launchctl print gui/$(id -u)/com.rexbotbridge.bridge` and `~/Library/Logs/rex-bot-bridge/bridge.log`, then `rex-bot setup` to reinstall the service.
+- **The bot gets HTTP 502:** Tailscale reached your Mac but the bridge is down. Check `launchctl print gui/$(id -u)/com.rexbotbridge.bridge` and `~/Library/Logs/rex-bot-bridge/bridge.log`, then `launchctl kickstart -k gui/$(id -u)/com.rexbotbridge.bridge` or `rex-bot setup services`.
 - **Doctor says the watcher heartbeat is old:** the watcher is down, so no status pushes. Check `watch.log` and `launchctl print gui/$(id -u)/com.rexbotbridge.watch`.
 - **The routine never fires:** `rex-bot doctor --test-webhook` should report HTTP 200. Then check the session is watched (`rex-bot watch list`) and that its agent reports status (OSC 7501). `notify.log` shows every attempt's status code.
 - **"refused: the bridge is in watched mode":** opt the session in (palette or `rex-bot watch add`), or `rex-bot config set mode full`.
@@ -140,9 +143,11 @@ Run `rex-bot doctor` first; every ❌ comes with a fix line.
 ## Uninstall
 
 ```sh
-rex-bot uninstall            # add --purge to delete ~/.config/rex-bot-bridge too
-npm uninstall -g rex-bot-bridge
+rex-bot uninstall [--purge] [--serve-off]   # --purge also deletes ~/.config/rex-bot-bridge; --serve-off removes the Tailscale Serve mapping
+npm rm -g rex-bot-bridge
 ```
+
+`init.lua` backups stay in `~/.config/rex/rex-bot-backups/`.
 
 ## Development
 
@@ -152,6 +157,7 @@ npm test                       # unit tests with a fake rex
 npm run typecheck
 npm run build
 node scripts/e2e-sandbox.mjs   # real Rex, sandboxed HOME, no launchd or Tailscale changes
+npm run docs:commands          # regenerate the README command table from --help
 ```
 
 ## License

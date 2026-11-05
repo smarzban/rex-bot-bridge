@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.3.0 — 2026-11-05
+
+Setup v3: no more circular order for new users, a Grok Bot guide, tsk-style help, and a curl installer.
+
+- **`rex-bot setup` no longer asks for the webhook** (you only get it after creating the Grok Bot routine). It prints
+  numbered sections (Checks, Settings, Rex palette, Services, Tailscale Serve, Agent skill), one ✅/⚠️/❌ line each
+  with a `fix:` line, and ends with a **Next** block: the Grok Bot guide, `rex-bot setup webhook`, and
+  `rex-bot doctor --test-webhook`. It no longer prints the Grok Bot text or offers to show the token.
+- **`rex-bot setup rex | services | serve | skill`** re-run one part on its own.
+- **`rex-bot setup webhook`** asks for the routine's webhook URL, key (hidden) and header name, saves them, and offers
+  a test post with a fix hint for 401/404/timeouts. `--url`, `--key-file FILE|-`, `--header`, `--yes`, `--no-test`.
+  Enter keeps a saved value, which is shown only as "set". `--webhook-*` on bare `setup` is now a usage error
+  pointing here. A bare `Bearer` at the key prompt is re-asked instead of meaning "no key".
+- **[docs/grok-bot.md](docs/grok-bot.md):** the Grok Bot guide (Tailscale plugin, connector, routine and its
+  instructions, webhook, test, troubleshooting), written so the Grok Bot agent can follow the raw URL too.
+  `rex-bot grokbot` now prints only the connector message and the guide's link.
+- **Help:** `rex-bot --help` lists commands in groups; every command has `rex-bot help <command>` /
+  `<command> --help` with usage, options, output, examples and exit codes. Unknown commands and options give one
+  line plus a `--help` hint, exit 2. The README command table is generated from it (`npm run docs:commands`).
+- **`install.sh`:** `curl -fsSL https://raw.githubusercontent.com/smarzban/rex-bot-bridge/main/install.sh | sh`
+  checks macOS/Node/npm, installs with npm (registry, else GitHub; `REX_BOT_SOURCE`, `REX_BOT_VERSION`), never uses
+  sudo, reports old → new version on upgrade, and offers to run `rex-bot setup`.
+- **Fix: launchd re-install race.** `bootout` returns before launchd has unloaded the service, so the immediate
+  `bootstrap` could fail ("Bootstrap failed: 5: Input/output error") and leave a service unloaded. Setup now waits
+  until the label is gone (up to 10 s), retries bootstrap 3 times with backoff, and names the service that failed
+  with launchctl's message and the exact `launchctl bootstrap` line.
+- **Fix: `uninstall --purge` deleted the init.lua backup it had just made.** Backups now live next to init.lua in
+  `~/.config/rex/rex-bot-backups/` and survive `--purge`; two backups in the same millisecond no longer overwrite.
+- doctor's fix lines are exact commands (`launchctl bootstrap gui/$(id -u) '<plist>'`, `launchctl kickstart -k …`,
+  `rex-bot setup webhook`, `rex-bot setup rex|services|skill`).
+- Packaging: `npm run build` keeps the exec bit on `dist/cli/*.js`; a `prepare` script builds on
+  `npm i -g github:smarzban/rex-bot-bridge`. Fake test keys are allow-listed for gitleaks.
+
 ## 0.2.0 — 2026-11-04
 
 One-command installer for other people (macOS).
