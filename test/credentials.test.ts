@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { tokenCommand, urlCommand } from "../src/credentials.js";
 import { makePrompter } from "../src/prompt.js";
 import { setup } from "../src/setup.js";
+import { readSettings, setKey, writeSettings } from "../src/settings.js";
 import { installSkills, uninstallSkills } from "../src/skills.js";
 import { fakeCtx, tempDir } from "./helpers.js";
 
@@ -58,6 +59,28 @@ test("token --rotate: new token in the file and on stdout; bridge loaded → kic
   assert.ok(!stderr.join("\n").includes(now));
 });
 
+test("token --rotate: kickstart fails → launchctl's error + fix line on stderr, new token still printed, exit 0", async () => {
+  const f = await fakeCtx(ok("{}"));
+  await withToken(f);
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  f.ctx.out = (s) => stdout.push(s);
+  f.ctx.err = (s) => stderr.push(s);
+  f.ctx.launchctl = async (args) => {
+    f.launchctlCalls.push(args);
+    if (args[0] === "print") return ok("state = running\npid = 42\n");
+    return { stdout: "", stderr: "Could not kickstart service: Operation not permitted", code: 1 };
+  };
+  assert.equal(await tokenCommand(f.ctx, true), 0);
+  const now = (await readFile(f.ctx.paths.tokenFile, "utf8")).trim();
+  assert.notEqual(now, FAKE);
+  assert.deepEqual(stdout, [now]);
+  const err = stderr.join("\n");
+  assert.match(err, /restarting com\.rexbotbridge\.bridge failed: Could not kickstart service: Operation not permitted\n {2}fix: rex-grokbot setup services/);
+  assert.match(err, /update the Authorization header of the rex connector/);
+  assert.ok(!err.includes(now));
+});
+
 test("token --rotate: bridge not loaded → no kickstart, still rotates", async () => {
   const f = await fakeCtx(ok("{}"));
   await withToken(f);
@@ -78,10 +101,24 @@ test("url: prints only https://<dns>/rex-bridge/mcp; warns on stderr when Serve 
 
   const g = await fakeCtx(ok("{}"));
   const gout: string[] = [];
+  const gerr: string[] = [];
   g.ctx.out = (s) => gout.push(s);
-  g.ctx.err = () => {};
+  g.ctx.err = (s) => gerr.push(s);
   assert.equal(await urlCommand(g.ctx), 0);
   assert.deepEqual(gout, ["https://mac.tail.ts.net/rex-bridge/mcp"], "stdout stays just the URL");
+  assert.equal(gerr.length, 1);
+  assert.match(gerr[0]!, /^rex-grokbot: warning: Tailscale Serve doesn't map \/rex-bridge to the bridge yet\.\n {2}fix: rex-grokbot setup serve$/);
+
+  // Serve status unreadable (target.kind === "unknown"): "couldn't confirm", fix points at doctor.
+  const u = await fakeCtx({ stdout: "", stderr: "serve: permission denied", code: 1 });
+  const uout: string[] = [];
+  const uerr: string[] = [];
+  u.ctx.out = (s) => uout.push(s);
+  u.ctx.err = (s) => uerr.push(s);
+  assert.equal(await urlCommand(u.ctx), 0);
+  assert.deepEqual(uout, ["https://mac.tail.ts.net/rex-bridge/mcp"]);
+  assert.equal(uerr.length, 1);
+  assert.match(uerr[0]!, /^rex-grokbot: warning: couldn't confirm that Tailscale Serve maps \/rex-bridge to the bridge \(serve: permission denied\)\.\n {2}fix: rex-grokbot doctor$/);
 
   const h = await fakeCtx(ok("{}"));
   h.ctx.tailscale = async () => ({ stdout: "", stderr: "not running", code: 1 });
@@ -126,4 +163,18 @@ test("setup on a fresh install has no webhook warning; a configured one still sh
   assert.ok(!/webhook not set/i.test(out), out);
   assert.ok(!/Webhook configured/.test(out));
   assert.match(out, /2\. Add the routine's webhook: rex-grokbot setup webhook/);
+});
+
+test("setup re-run with a configured webhook shows ✅ Webhook configured", async () => {
+  const f = await fakeCtx(ok("{}"));
+  const flags = { yes: true, mode: "watched" as const, services: false, serve: false, skills: false, rexConfig: false };
+  await setup(f.ctx, flags, makePrompter(true));
+  const s = await readSettings(f.ctx.paths.configFile);
+  await writeSettings(f.ctx.paths.configFile, setKey(s, "webhook.url", "https://hooks.example.test/fake"));
+  f.out.length = 0;
+  assert.equal(await setup(f.ctx, { ...flags, mode: undefined }, makePrompter(true)), 0, f.out.join("\n"));
+  const out = f.out.join("\n");
+  assert.match(out, /✅ Webhook configured \(change it: rex-grokbot setup webhook\)/);
+  assert.ok(!/webhook not set/i.test(out));
+  assert.ok(!out.includes("hooks.example.test"), "the webhook URL is never printed");
 });
