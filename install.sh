@@ -82,16 +82,42 @@ installed_version() {
 }
 
 choose_spec() {
-  source=${REX_BOT_SOURCE:-}
+  SOURCE=${REX_BOT_SOURCE:-}
   version=${REX_BOT_VERSION:-}
-  if [ -z "$source" ]; then
-    if npm view "$PKG" version >/dev/null 2>&1; then source=npm; else source=github; fi
+  if [ -z "$SOURCE" ]; then
+    if npm view "$PKG" version >/dev/null 2>&1; then SOURCE=npm; else SOURCE=github; fi
   fi
-  case "$source" in
+  case "$SOURCE" in
     npm) SPEC="$PKG@${version:-latest}" ;;
-    github) SPEC="github:$REPO#${version:-main}" ;;
-    *) die "REX_BOT_SOURCE must be npm or github, not '$source'." ;;
+    github)
+      REF=${version:-main}
+      SPEC="github:$REPO#$REF"
+      ;;
+    *) die "REX_BOT_SOURCE must be npm or github, not '$SOURCE'." ;;
   esac
+}
+
+# From GitHub: download the source at REF, build it in a temp folder, and pack it, so the global install
+# is a plain tarball install. (npm's own `npm i -g github:…` prepares git deps with the global flag still
+# set, which loses the build's devDependencies.) Sets SPEC to the tarball.
+build_from_github() {
+  WORK=$(mktemp -d "${TMPDIR:-/tmp}/rex-bot-install.XXXXXX")
+  trap 'rm -rf "$WORK"' EXIT
+  say "Downloading $REPO@$REF and building it ..."
+  curl -fsSL "https://codeload.github.com/$REPO/tar.gz/$REF" | tar -xzf - -C "$WORK" ||
+    die "Could not download $REPO at '$REF' (check REX_BOT_VERSION)."
+  src=$(find "$WORK" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+  [ -f "$src/package.json" ] || die "The download of $REPO@$REF has no package.json."
+  # A local build: the user's global prefix settings must not apply here.
+  (
+    cd "$src" &&
+      env -u NPM_CONFIG_PREFIX -u npm_config_prefix -u NPM_CONFIG_GLOBAL -u npm_config_global \
+        npm install --include=dev --no-audit --no-fund --ignore-scripts --loglevel=error >/dev/null &&
+      env -u NPM_CONFIG_PREFIX -u npm_config_prefix -u NPM_CONFIG_GLOBAL -u npm_config_global \
+        npm pack --pack-destination "$WORK" --loglevel=error >/dev/null
+  ) || die "Building $REPO@$REF failed (see npm's message above)."
+  SPEC=$(find "$WORK" -maxdepth 1 -name "$PKG-*.tgz" | head -n 1)
+  [ -n "$SPEC" ] || die "Building $REPO@$REF produced no package."
 }
 
 finish() {
@@ -125,8 +151,10 @@ main() {
   old=$(installed_version)
 
   say ""
-  say "Installing $SPEC into $PREFIX (npm install -g) ..."
-  npm install -g --no-fund --no-audit "$SPEC" || die "npm install -g $SPEC failed (see npm's message above)."
+  label=$SPEC
+  if [ "$SOURCE" = github ]; then build_from_github; fi
+  say "Installing $label into $PREFIX (npm install -g) ..."
+  npm install -g --no-fund --no-audit --loglevel=error "$SPEC" >/dev/null || die "npm install -g $label failed (see npm's message above)."
 
   new=$("$BIN/rex-bot" --version 2>/dev/null) || die "Installed, but $BIN/rex-bot --version doesn't run."
   if [ -n "$old" ] && [ "$old" != "$new" ]; then
