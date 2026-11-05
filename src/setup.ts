@@ -211,7 +211,7 @@ async function servicesSection(ctx: Ctx, out: Printer, s: Settings, p: Prompter)
   if (isEphemeralInstall(ctx.pkgRoot)) {
     out.warn(
       "rex-bot-bridge is running from an npx cache; services must point at a stable install.",
-      "npm i -g github:smarzban/rex-bot-bridge && rex-bot setup",
+      "curl -fsSL https://raw.githubusercontent.com/smarzban/rex-bot-bridge/main/install.sh | sh",
     );
     if (!(await p.confirm("Install services pointing at this npx cache anyway?", false))) {
       out.warn("Services not installed.", "rex-bot setup services (from a global install)");

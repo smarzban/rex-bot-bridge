@@ -53,7 +53,7 @@ Other protections:
    ```
 
    Read the script first if you like: <https://raw.githubusercontent.com/smarzban/rex-bot-bridge/main/install.sh>. It checks macOS, Node and npm, installs the `rex-bot` CLI with npm (never sudo), and offers to run `rex-bot setup`. Re-run it to upgrade.
-   Or install with npm yourself: `npm i -g github:smarzban/rex-bot-bridge` (`npm i -g rex-bot-bridge` once it's on npm).
+   Or with npm yourself: `npm i -g rex-bot-bridge` once it's on npm; until then from a checkout: `git clone https://github.com/smarzban/rex-bot-bridge && cd rex-bot-bridge && npm install && npm i -g .`
 3. **Set up this Mac:** `rex-bot setup` (the installer offers to run it).
 4. **Set up Grok Bot:** follow [docs/grok-bot.md](docs/grok-bot.md): the connector and the routine. You can also give your Grok Bot that page's raw address: `https://raw.githubusercontent.com/smarzban/rex-bot-bridge/main/docs/grok-bot.md`.
 5. **Give the routine's webhook to this Mac:** `rex-bot setup webhook`

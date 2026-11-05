@@ -30,8 +30,10 @@ Setup v3: no more circular order for new users, a Grok Bot guide, tsk-style help
   `~/.config/rex/rex-bot-backups/` and survive `--purge`; two backups in the same millisecond no longer overwrite.
 - doctor's fix lines are exact commands (`launchctl bootstrap gui/$(id -u) '<plist>'`, `launchctl kickstart -k …`,
   `rex-bot setup webhook`, `rex-bot setup rex|services|skill`).
-- Packaging: `npm run build` keeps the exec bit on `dist/cli/*.js`; a `prepare` script builds on
-  `npm i -g github:smarzban/rex-bot-bridge`. Fake test keys are allow-listed for gitleaks.
+- Packaging: `npm run build` keeps the exec bit on `dist/cli/*.js` (a linked `npm i -g <folder>` no longer says
+  "permission denied" after a rebuild); `prepare` builds a checkout or git install. `install.sh` builds GitHub refs
+  itself, because npm 11 prepares a *global* git dependency without its devDependencies. Fake test keys are
+  allow-listed for gitleaks.
 
 ## 0.2.0 — 2026-11-04
 
