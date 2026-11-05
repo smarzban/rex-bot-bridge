@@ -10,7 +10,13 @@ export interface Settings {
   mode: Mode;
   host: string;
   port: number;
-  servePath: string;
+  /** The tailnet HTTPS port Tailscale Serve gives the bridge as its own origin (https://<mac>:<servePort>). */
+  servePort: number;
+  /**
+   * Legacy (≤ 0.4): the path the bridge used on :443 (`--set-path`). Read only to find and remove that old
+   * mapping; not settable and never used for new installs.
+   */
+  servePath?: string;
   webhook: { url?: string; key?: string; header?: string };
   /** What setup chose not to install, so doctor reports those checks as skipped instead of failed. */
   skipped?: { services?: boolean; serve?: boolean };
@@ -22,13 +28,19 @@ export const DEFAULTS: Settings = {
   mode: "watched",
   host: "127.0.0.1",
   port: 7400,
-  servePath: "/rex-bridge",
+  servePort: 8443,
   webhook: {},
 };
 
 /** Keys `rex-grokbot config get|set` accepts. Secrets are hidden by `get` unless --show. */
-export const KEYS = ["mode", "port", "host", "servePath", "webhook.url", "webhook.key", "webhook.header"] as const;
+export const KEYS = ["mode", "port", "host", "servePort", "webhook.url", "webhook.key", "webhook.header"] as const;
 export type Key = (typeof KEYS)[number];
+/** The path ≤ 0.4 mapped on :443, for finding and removing that legacy mapping. */
+export const LEGACY_SERVE_PATH = "/rex-bridge";
+export function legacyServePath(s: Settings): string {
+  return s.servePath || LEGACY_SERVE_PATH;
+}
+
 export const SECRET_KEYS: readonly Key[] = ["webhook.url", "webhook.key"];
 
 export async function settingsExist(path: string): Promise<boolean> {
@@ -49,6 +61,7 @@ export async function readSettings(path: string): Promise<Settings> {
   }
   const s: Settings = { ...DEFAULTS, ...raw, webhook: { ...(raw.webhook ?? {}) } };
   if (!MODES.includes(s.mode)) s.mode = DEFAULTS.mode;
+  if (!Number.isInteger(s.servePort) || s.servePort < 1 || s.servePort > 65535 || s.servePort === 443) s.servePort = DEFAULTS.servePort;
   return s;
 }
 
@@ -94,10 +107,14 @@ export function setKey(s: Settings, key: Key, value: string): Settings {
     case "host":
       out.host = value;
       break;
-    case "servePath":
-      if (!/^\/[A-Za-z0-9._~-]+$/.test(value)) throw new Error("servePath must look like /rex-bridge");
-      out.servePath = value;
+    case "servePort": {
+      const n = Number(value);
+      if (!Number.isInteger(n) || n < 1 || n > 65535) throw new Error(`servePort must be 1-65535, got ${value}`);
+      // 443 is the Mac's shared origin, where other apps' OAuth metadata can hijack the connector.
+      if (n === 443) throw new Error("servePort can't be 443: the bridge needs its own origin (default 8443)");
+      out.servePort = n;
       break;
+    }
     case "webhook.url":
       if (value && !/^https?:\/\//.test(value)) throw new Error("webhook.url must start with https:// or http://");
       out.webhook.url = value || undefined;

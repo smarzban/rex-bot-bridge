@@ -39,9 +39,41 @@ test("auth: good token -> 200", async () => {
   assert.equal(r.status, 200);
 });
 
-test("auth: prefixed path (tailscale serve --set-path) works too", async () => {
+test("auth: prefixed path (legacy tailscale serve --set-path) works too", async () => {
   const r = await fetch(bridge.url + "/rex-bridge/mcp", { method: "POST", body: initBody });
   assert.equal(r.status, 401);
+});
+
+test("T431 auth: the 401 on /mcp is a plain Bearer challenge with no resource_metadata", async () => {
+  const r = await post({});
+  assert.equal(r.status, 401);
+  assert.equal(r.headers.get("www-authenticate"), 'Bearer realm="rex-bot-bridge"');
+  assert.deepEqual(await r.json(), { error: "unauthorized" });
+});
+
+test("T431 .well-known: every OAuth discovery path is a JSON 404 (never 401, never metadata)", async () => {
+  const paths = [
+    "/.well-known/oauth-authorization-server",
+    "/.well-known/oauth-authorization-server/mcp",
+    "/.well-known/oauth-protected-resource",
+    "/.well-known/oauth-protected-resource/mcp",
+    "/.well-known/openid-configuration",
+    "/.well-known/anything/healthz",
+    "/rex-bridge/.well-known/oauth-protected-resource/mcp",
+  ];
+  for (const path of paths) {
+    for (const method of ["GET", "POST", "OPTIONS"]) {
+      const r = await fetch(bridge.url + path, { method, headers: { authorization: `Bearer ${TOKEN}` } });
+      assert.equal(r.status, 404, `${method} ${path}`);
+      assert.equal(r.headers.get("content-type"), "application/json");
+      assert.equal(r.headers.get("www-authenticate"), null, `${method} ${path}`);
+      assert.deepEqual(await r.json(), { error: "not found" });
+    }
+  }
+  // The SDK's fallback endpoints when no metadata is found are plain 404s too.
+  for (const path of ["/authorize", "/token", "/register", "/"]) {
+    assert.equal((await fetch(bridge.url + path, { method: "POST" })).status, 404, path);
+  }
 });
 
 test("healthz needs no auth and returns only ok/rex_reachable/heartbeat", async () => {

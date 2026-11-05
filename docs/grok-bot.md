@@ -14,8 +14,8 @@ Before you start, the person has run `rex-grokbot setup` on the Mac (it ends by 
 | Step | Who | What |
 |---|---|---|
 | 1a. Tailscale plugin | Person in the Grok Bot app | Install / authenticate the Tailscale plugin on the Mac's tailnet |
-| 1b. Reachability check | Grok Bot | Fetch `…/rex-bridge/healthz` through the plugin, expect `"ok":true` |
-| 2a. Connector URL | Person on the Mac → Grok Bot | `rex-grokbot url`; give the URL to Grok Bot, which prepares the connector |
+| 1b. Reachability check | Grok Bot | Fetch `https://<mac>.<tailnet>.ts.net:8443/healthz` through the plugin, expect `"ok":true` |
+| 2a. Connector URL | Person on the Mac → Grok Bot | `rex-grokbot url`; give the URL to Grok Bot, which prepares the connector (static header auth, never OAuth) |
 | 2b. Token | Person (on the Mac, then in the Grok Bot app) | `rex-grokbot token \| pbcopy`; enter it as the connector's header |
 | 2c. Check | Grok Bot | Call `bridge_status` |
 | 3. Routine | Grok Bot (when asked), person reviews | Webhook-triggered routine with the `rex` connector and the instructions below |
@@ -31,15 +31,17 @@ The bridge is only on the tailnet (Tailscale Serve, not Funnel), so Grok Bot rea
 - In the Grok Bot desktop app: **Connect apps → Your plugins → Tailscale → Authenticate**.
 - If Tailscale isn't under **Your plugins**, install it from the plugins available in **Connect apps** first (where exactly may vary by app version), then authenticate.
 - Log in to the **same tailnet as the Mac** (`tailscale status` on the Mac shows which one).
-- The Mac's tailnet needs **MagicDNS** and **HTTPS certificates** turned on (Tailscale admin console → DNS). `rex-grokbot setup` already mapped `https://<mac>.<tailnet>.ts.net/rex-bridge` to the bridge; `rex-grokbot doctor` shows it.
+- The Mac's tailnet needs **MagicDNS** and **HTTPS certificates** turned on (Tailscale admin console → DNS). `rex-grokbot setup` already gave the bridge its own address, `https://<mac>.<tailnet>.ts.net:8443` (a port of its own, not shared with other apps on the Mac); `rex-grokbot doctor` shows it.
 
 ### 1b. Reachability check (Grok Bot), before adding the connector
 
-Ask the person for the Mac's address (the output of `rex-grokbot url`, step 2a, works: drop the trailing `/mcp`). Then, through the Tailscale plugin, fetch:
+Ask the person for the Mac's address (the output of `rex-grokbot url`, step 2a, works: replace the trailing `/mcp` with `/healthz`). Then, through the Tailscale plugin, fetch:
 
 ```text
-GET https://<mac>.<tailnet>.ts.net/rex-bridge/healthz
+GET https://<mac>.<tailnet>.ts.net:8443/healthz
 ```
+
+(`:8443` is the default; if the person changed `servePort`, `rex-grokbot url` shows the right port.)
 
 No token is needed. Expect HTTP 200 with `"ok":true` (it also reports `rex_reachable` and `watcher_heartbeat_age_s`).
 
@@ -50,7 +52,8 @@ If it fails:
 | The plugin can't be used / asks to log in | Plugin not authenticated | Person: redo 1a |
 | Name doesn't resolve, or connection times out | Plugin on a different tailnet, MagicDNS off, or the Mac is asleep/offline | Person: check the tailnet matches and the Mac is awake; `tailscale status` on the Mac |
 | TLS / certificate error | HTTPS certificates not enabled on the tailnet | Person: enable HTTPS in the Tailscale admin console, then `rex-grokbot setup serve` |
-| HTTP 404 | Tailscale Serve isn't mapping `/rex-bridge` | Person: `rex-grokbot setup serve` |
+| Connection refused on `:8443`, or HTTP 404 | Tailscale Serve isn't mapping the bridge's port | Person: `rex-grokbot setup serve` |
+| An HTML page or another app answers | The URL is missing `:8443` (port 443 belongs to other apps on the Mac) | Use exactly the address `rex-grokbot url` prints |
 | HTTP 502 | Tailscale reached the Mac but the bridge isn't running | Person: `rex-grokbot doctor` and follow its fix lines |
 
 Don't add the connector until this check passes.
@@ -65,14 +68,16 @@ On the Mac:
 rex-grokbot url
 ```
 
-It prints only the connector URL, `https://<mac>.<tailnet>.ts.net/rex-bridge/mcp`. The URL is not a secret: the person gives it to Grok Bot in chat. Grok Bot prepares a custom MCP connector:
+It prints only the connector URL, `https://<mac>.<tailnet>.ts.net:8443/mcp`. The URL is not a secret: the person gives it to Grok Bot in chat. Grok Bot prepares a custom MCP connector:
 
 | Field | Value |
 |---|---|
 | Name | `rex` |
 | URL | the output of `rex-grokbot url` |
 | Transport | Streamable HTTP |
-| Auth | a static header, `Authorization: Bearer <token>` (not OAuth) |
+| Auth | **none / custom headers** with one static header, `Authorization: Bearer <token>`. Never OAuth. |
+
+The bridge has no OAuth and never will: if the app offers an OAuth or "sign in" option for the connector, don't pick it. With the static header the app never needs to discover or sign in to anything.
 
 ### 2b. Credential (person)
 
@@ -92,7 +97,7 @@ We haven't verified which secret-entry options the Grok Bot app offers; use the 
 
 ### 2c. Check (Grok Bot)
 
-Call the connector's `bridge_status` tool. Expect the mode (`watched` or `full`) and the Rex version. HTTP 401 means the header is wrong: redo 2b.
+Call the connector's `bridge_status` tool. Expect the mode (`watched` or `full`) and the Rex version. HTTP 401 means the header is wrong: redo 2b. "Authorization failed" or a sign-in prompt means the connector was saved as OAuth: see Troubleshooting.
 
 ## 3. Create the routine (Grok Bot when asked; the person reviews it)
 
@@ -180,6 +185,7 @@ Grok Bot sees the session ids in events (`rex_session`) and in `list_agents`, bu
 ## Troubleshooting
 
 - **The healthz check or the connector fails:** see the table in 1b. On the Mac, `rex-grokbot doctor` checks the whole chain and prints a fix line for each problem.
+- **"rex authorization failed", or the app tries to sign in / opens an OAuth page:** the connector was saved with OAuth instead of the static header. Delete the `rex` connector and add it again (2a, 2b) with auth type none / custom headers and `Authorization: Bearer <token>`. Also check its URL is exactly what `rex-grokbot url` prints, with `:8443`: an older URL ending in `/rex-bridge/mcp` points at port 443, which other apps on the Mac share, and their sign-in metadata confuses the app. The bridge itself answers 404 to every `/.well-known/` OAuth lookup.
 - **The connector gets HTTP 401:** wrong token. Redo 2b (`rex-grokbot token | pbcopy`) and update the connector's header.
 - **The test post gets HTTP 401/403:** the routine refused the key. Run `rex-grokbot setup webhook` again and check the header name (`Authorization` or the one the trigger names).
 - **The test post gets HTTP 404:** the URL is wrong or the routine was deleted. Copy the webhook URL again and run `rex-grokbot setup webhook`.
