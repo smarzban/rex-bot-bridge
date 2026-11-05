@@ -60,8 +60,33 @@ check_tools() {
 }
 
 # Sets PREFIX and BIN; fails with a fix when the global prefix isn't writable.
+# npm 11 redacts UUID-looking path segments in its output ("/a/***/b"), so `npm prefix -g` can print a
+# path that doesn't exist. Then use the first known candidate that matches it with *** as a wildcard:
+# $NPM_CONFIG_PREFIX / $npm_config_prefix, or the folder npm itself is installed in.
+resolve_redacted_prefix() {
+  shown=$1
+  pattern=$(printf '%s' "$shown" | sed 's/\*\*\*/*/g')
+  npm_home=""
+  npm_path=$(command -v npm) && npm_home=$(dirname "$(dirname "$npm_path")")
+  for candidate in "${NPM_CONFIG_PREFIX:-}" "${npm_config_prefix:-}" "$npm_home"; do
+    [ -n "$candidate" ] || continue
+    # shellcheck disable=SC2254 # $pattern is a glob on purpose
+    case "$candidate" in $pattern) printf '%s' "$candidate" && return 0 ;; esac
+  done
+  return 1
+}
+
 check_prefix() {
   PREFIX=$(npm prefix -g 2>/dev/null) || die "Could not read npm's global prefix (npm prefix -g)."
+  case "$PREFIX" in
+    *'***'*)
+      shown_prefix=$PREFIX
+      PREFIX=$(resolve_redacted_prefix "$shown_prefix") ||
+        die "npm hid part of its global folder path (it printed $shown_prefix), so this installer can't tell where rex-bot will be installed. Nothing was installed. Set NPM_CONFIG_PREFIX to npm's global folder (the one holding bin/ and
+lib/node_modules) and run again, e.g.:
+    curl -fsSL https://raw.githubusercontent.com/$REPO/main/install.sh | NPM_CONFIG_PREFIX=/path/to/prefix sh"
+      ;;
+  esac
   BIN="$PREFIX/bin"
   # The nearest folder that exists: npm creates the rest, so that's the one that must be writable.
   target="$PREFIX/lib/node_modules"
