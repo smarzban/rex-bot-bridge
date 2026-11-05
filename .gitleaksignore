@@ -1,2 +1,5 @@
 # Test fixture in test/installer.test.ts (an early commit on feat/installer-v2), not a real key.
 60449395e9dfdfd575e2f09142241fb9ecd7c308:test/installer.test.ts:generic-api-key:250
+# Fake fixture keys in test/pty.test.ts (commit 8d3f3ad, T428), not real keys. Lines added later carry `gitleaks:allow`.
+8d3f3adf9d6e71fee1bf1e50c5c340bd3c6a527d:test/pty.test.ts:generic-api-key:47
+8d3f3adf9d6e71fee1bf1e50c5c340bd3c6a527d:test/pty.test.ts:generic-api-key:65

@@ -89,20 +89,25 @@ try {
   // ---- 1. setup ----
   const setupRes = await cli([
     "setup", "--yes", "--no-services", "--no-serve", "--mode", "watched",
-    "--webhook-url", SINK_URL, "--webhook-key-file", keyFile,
   ]);
-  console.log(setupRes.stdout.split("━━━ Grok Bot setup")[0].trim());
+  console.log(setupRes.stdout.trim());
   check(setupRes.code === 0, `setup exit ${setupRes.code} ${setupRes.stderr.trim()}`);
   const token = (await readFile(join(SB, ".config/rex-bot-bridge/token"), "utf8")).trim();
   check(!setupRes.stdout.includes(token) && !setupRes.stderr.includes(token), "setup output never shows the token");
-  check(!setupRes.stdout.includes(KEY) && !setupRes.stdout.includes("e2e-sink-path"), "setup output never shows the webhook URL/key");
-  check(setupRes.stdout.includes("<TOKEN>") && setupRes.stdout.includes("rex-bot grokbot --show-token"), "Grok Bot text uses a token placeholder");
+  check(setupRes.stdout.trimEnd().endsWith("3. Check everything: rex-bot doctor --test-webhook"), "setup ends with the Next block");
+  const hook = await cli(["setup", "webhook", "--url", SINK_URL, "--key-file", keyFile, "--yes"]);
+  console.log(hook.stdout.trim());
+  check(hook.code === 0 && hook.stdout.includes("Test sent: HTTP 200"), `setup webhook saved and test-posted (exit ${hook.code}) ${hook.stderr.trim()}`);
+  check(!(hook.stdout + hook.stderr).includes(KEY) && !(hook.stdout + hook.stderr).includes("e2e-sink-path"), "setup webhook output never shows the webhook URL/key");
+  check(!!(await waitFor((r) => r.body?.event === "doctor_test" && r.auth === `Bearer ${KEY}`, 3000)), "sink got the setup webhook test post with Bearer <key>");
+  const gb = await cli(["grokbot"]);
+  check(gb.stdout.includes("<TOKEN>") && gb.stdout.includes("rex-bot grokbot --show-token") && gb.stdout.includes("docs/grok-bot.md") && !gb.stdout.includes(token), "grokbot prints the connector message with a token placeholder and the guide link");
   const stateDir = join(SB, ".config/rex-bot-bridge");
   check(((await stat(stateDir)).mode & 0o777) === 0o700, "state dir is 700");
   for (const f of ["token", "config.json"]) check(((await stat(join(stateDir, f))).mode & 0o777) === 0o600, `${f} is 600`);
   const initAfter = await readFile(join(SB, ".config/rex/init.lua"), "utf8");
   check(initAfter.startsWith(userInit) && initAfter.includes("-- >>> rex-bot-bridge >>>") && initAfter.includes(join(ROOT, "lua/rex-bot-actions.lua")), "init.lua got the marked dofile block, user code kept");
-  check((await readdir(join(stateDir, "init-backups"))).length === 1, "init.lua backed up");
+  check((await readdir(join(SB, ".config/rex/rex-bot-backups"))).length === 1, "init.lua backed up next to init.lua");
   check((await readFile(join(stateDir, "watched"), "utf8")).includes(V1_ID), "v1 opt-in list migrated");
   for (const root of [".claude", ".agents"]) {
     const skill = await readFile(join(SB, root, "skills/rex-bot/SKILL.md"), "utf8").catch(() => "");
@@ -258,6 +263,7 @@ check(!!(await stat(join(SB, ".config/rex-bot-bridge/token")).catch(() => null))
 check(!/Services stopped/.test(un.stdout), "uninstall did not touch launchd (no plists in the sandbox)");
 const purge = await cli(["uninstall", "--yes", "--purge"]);
 check(purge.code === 0 && !(await stat(join(SB, ".config/rex-bot-bridge")).catch(() => null)), "uninstall --purge deletes the state dir");
+check((await readdir(join(SB, ".config/rex/rex-bot-backups")).catch(() => [])).length >= 2, "uninstall --purge keeps the init.lua backups");
 
 sink.close();
 console.log(`\n${failures ? `${failures} FAILED` : "ALL PASSED"} (sandbox ${SB})`);
