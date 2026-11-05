@@ -332,3 +332,18 @@ test("T428 cli: `rex-bot --version` / `-v` exit 0 and print exactly the package.
     assert.equal(r.stdout, `${pkg.version}\n`);
   }
 });
+
+test("T429 FR1-E: setup webhook writes only webhook.* — a mode change during the prompts survives", async () => {
+  const f = await fakeCtx({ stdout: "{}", stderr: "", code: 0 });
+  await writeSettings(f.ctx.paths.configFile, { ...DEFAULTS, mode: "watched", port: 7400 });
+  const p = scriptedPrompter({ [URL_Q]: URL, [HEADER_Q]: "" });
+  const ask = p.ask.bind(p);
+  p.ask = async (q, o) => {
+    // While the key question is open, someone runs `rex-bot config set mode full` / `port 7411`.
+    if (q.includes(KEY_Q)) await writeSettings(f.ctx.paths.configFile, { ...DEFAULTS, mode: "full", port: 7411 });
+    return q.includes(KEY_Q) ? "k-secret-e" : ask(q, o);
+  };
+  assert.equal(await setupWebhook(f.ctx, NO_TEST, p), 0);
+  const s = await readSettings(f.ctx.paths.configFile);
+  assert.deepEqual([s.mode, s.port, s.webhook.url, s.webhook.key], ["full", 7411, URL, "k-secret-e"]);
+});

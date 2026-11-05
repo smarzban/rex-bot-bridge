@@ -222,6 +222,9 @@ export async function setupWebhook(ctx: Ctx, flags: WebhookFlags, p: Prompter, o
   }
   header ??= key ? (cur.header ?? "Authorization") : undefined;
 
+  // Re-read right before saving: the prompts can take minutes, and anything else (mode, port, …) may
+  // have changed meanwhile. Only the webhook.* fields are ours to write.
+  s = await readSettings(ctx.paths.configFile);
   s = setKey(s, "webhook.url", url);
   s = setKey(s, "webhook.key", key ?? "");
   s = setKey(s, "webhook.header", header && header.toLowerCase() !== "authorization" ? header : "");
