@@ -1,6 +1,6 @@
 {
   "name": "rex-bot-bridge",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Let a coordinator bot (Grok Bot over Tailscale) see and drive the coding agents running in your Rex terminals. One-command macOS installer.",
   "keywords": [
     "rex",

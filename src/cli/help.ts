@@ -38,7 +38,7 @@ export const HELP: Record<string, CommandHelp> = {
         [
           ["rex", "add the palette actions to Rex's init.lua (backed up, checked, rolled back on failure)"],
           ["services", "install and (re)start the launchd services com.rexbotbridge.bridge and .watch"],
-          ["serve", "map https://<mac>.<tailnet>.ts.net/rex-bridge to the bridge (tailscale serve, asks)"],
+          ["serve", "give the bridge its own origin, https://<mac>.<tailnet>.ts.net:8443 (tailscale serve, asks)"],
           ["skill", "install the rex-grokbot agent skill into ~/.claude/skills and ~/.agents/skills"],
           ["webhook", "ask for the routine's webhook URL, key and header, save, send a test (see help setup webhook)"],
         ],
@@ -126,14 +126,15 @@ export const HELP: Record<string, CommandHelp> = {
     description:
       "Stop and remove the launchd services, the init.lua block and the agent skill. Keeps\n" +
       "~/.config/rex-bot-bridge (token, config, watched list) unless --purge. Asks before removing the\n" +
-      "Tailscale Serve mapping, and only ever removes our own.",
+      "Tailscale Serve mappings (our port, and the old /rex-bridge path on 443 if still there), and\n" +
+      "only ever removes our own.",
     sections: [
       [
         "Options",
         [
-          ["--yes, -y", "don't ask (the Serve mapping stays unless --serve-off)"],
+          ["--yes, -y", "don't ask (the Serve mappings stay unless --serve-off)"],
           ["--purge", "also delete ~/.config/rex-bot-bridge"],
-          ["--serve-off", "also remove our Tailscale Serve mapping"],
+          ["--serve-off", "also remove our Tailscale Serve mappings"],
         ],
       ],
     ],
@@ -143,7 +144,7 @@ export const HELP: Record<string, CommandHelp> = {
   config: {
     usage: ["rex-grokbot config get <key> [--show]", "rex-grokbot config set <key> <value>"],
     summary: "read or change one setting in config.json",
-    description: "Read or change one setting in ~/.config/rex-bot-bridge/config.json. Mode changes apply on the\nbot's next call; port and host need the services restarted (rex-grokbot setup services).",
+    description: "Read or change one setting in ~/.config/rex-bot-bridge/config.json. Mode changes apply on the\nbot's next call; port and host need the services restarted (rex-grokbot setup services);\nservePort (the tailnet HTTPS port, default 8443, not 443) needs rex-grokbot setup serve.",
     sections: [
       [
         "Arguments",
@@ -159,11 +160,11 @@ export const HELP: Record<string, CommandHelp> = {
   },
   url: {
     usage: ["rex-grokbot url"],
-    summary: "print the Grok Bot connector URL (https://<mac>.<tailnet>.ts.net/rex-bridge/mcp)",
+    summary: "print the Grok Bot connector URL (https://<mac>.<tailnet>.ts.net:8443/mcp)",
     description:
       "Print this Mac's connector URL and nothing else, for the rex connector in Grok Bot. It is not a\n" +
       "secret; the token is (see rex-grokbot token). Warns on stderr if Tailscale Serve doesn't map it yet.",
-    sections: [["Output", [["stdout", "https://<mac>.<tailnet>.ts.net/rex-bridge/mcp"]]]],
+    sections: [["Output", [["stdout", "https://<mac>.<tailnet>.ts.net:8443/mcp (port: servePort)"]]]],
     examples: ["rex-grokbot url"],
     exit: "0 printed · 1 Tailscale isn't running (fix line on stderr) · 2 usage",
   },

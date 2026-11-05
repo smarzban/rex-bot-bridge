@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.5.0 — 2026-11-05
+
+The bridge gets its own HTTPS origin on the tailnet, so another app's OAuth metadata can't hijack the connector.
+
+Seen live: Grok Bot showed "rex authorization failed" while the bridge itself answered fine. Port 443 on the Mac
+belonged to another app, which serves OAuth metadata at `https://<mac>/.well-known/oauth-authorization-server`.
+An MCP client that gets our 401 runs RFC 9728 / RFC 8414 discovery at the origin root, found that app's auth server
+and tried to sign in there. Sharing an origin was the root cause.
+
+- **Own port.** `rex-grokbot setup serve` now runs `tailscale serve --bg --https=8443 http://127.0.0.1:7400` (the
+  whole port, no `--set-path`). The connector URL is `https://<mac>.<tailnet>.ts.net:8443/mcp`; healthz is
+  `…:8443/healthz`. New setting `servePort` (default 8443; 1-65535, not 443): `rex-grokbot config set servePort
+  <port>`. Tailscale Serve accepts any HTTPS port (Funnel would limit it to 443/8443/10000; we never use Funnel).
+- **A port already in use is never replaced without asking** (any handler on it, several paths, or a TCP
+  forward): default no, `--yes` never replaces. An explicit yes clears the port, then maps it.
+- **Migration from 0.4.** If our old `/rex-bridge` path on port 443 is still there (and proxies to this bridge),
+  setup offers (default yes) to remove it once `https://<mac>:8443/healthz` answers, and says to update the
+  connector URL. Only that path is removed (`tailscale serve --https=443 --set-path /rex-bridge off`); `/` and
+  other paths are never touched, nor a `/rex-bridge` that points elsewhere. If the new origin doesn't answer yet,
+  the old path is kept and the off command is printed. `servePath` in an old `config.json` is read only for this
+  and is no longer a settable key.
+- **No OAuth, ever.** The bridge answers a JSON 404 to every `/.well-known/*` path (checked before the `/mcp`
+  suffix match: `/.well-known/oauth-protected-resource/mcp` used to get a 401). A missing or wrong token still
+  gets `401` with `WWW-Authenticate: Bearer realm="rex-bot-bridge"` and no `resource_metadata`.
+- **`url`, `doctor`, `uninstall`, help, README and the guide** use the new origin. Doctor checks the port mapping,
+  the tailnet healthz, a new `oauth_discovery` check (`…:8443/.well-known/oauth-authorization-server` must be
+  404), and warns (`serve_legacy`) with the exact off command when our old `/rex-bridge` mapping is still on 443.
+  `uninstall` removes our port mapping and our legacy path (asked; with `--yes` only with `--serve-off`).
+- **Guide:** the connector's auth is none / custom headers with the static `Authorization: Bearer <token>`, never
+  OAuth; a troubleshooting entry for "authorization failed" / a sign-in prompt (delete the connector and re-add it
+  with the header and the `:8443` URL); the reachability check uses `…:8443/healthz`.
+
+Upgrading: re-run `rex-grokbot setup` (or `rex-grokbot setup serve`), then update the `rex` connector in Grok Bot
+to the URL `rex-grokbot url` prints.
+
 ## 0.4.0 — 2026-11-05
 
 The command is now `rex-grokbot`; the connector's endpoint and credential are printed separately; the Grok Bot
