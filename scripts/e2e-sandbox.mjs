@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 // Sandbox end-to-end check: real Rex, real Node, no launchd, no Tailscale changes.
 //
-//   npm run build && node scripts/e2e-sandbox.mjs
+//   node scripts/e2e-sandbox.mjs   (runs npm run build itself)
 //
 // HOME and XDG_CONFIG_HOME point at a temp dir, so setup's init.lua, skills, config and logs land there.
 // Creates two Rex sessions labelled `e2e-sandbox-*`, and kills only those. Never touches the real
 // ~/.config, the real init.lua, launchd, or tailscale serve.
 import { spawn, execFile } from "node:child_process";
-import { chmod, mkdtemp, mkdir, readFile, writeFile, readdir, stat } from "node:fs/promises";
+import { chmod, copyFile, mkdtemp, mkdir, readFile, writeFile, readdir, stat, symlink } from "node:fs/promises";
 import { createServer } from "node:http";
 import { homedir, tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -27,6 +27,18 @@ const check = (cond, what) => {
   if (!cond) failures++;
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ---- 0. build: dist/cli/*.js must be executable straight out of `npm run build` ----
+// Checked here, before npm (pack/install) touches them: npm sets the bit itself on install, so only this
+// catches a build script that lost its chmod.
+{
+  const b = await run("npm", ["run", "build", "--loglevel=error"], { cwd: ROOT, timeout: 180_000 }).then(() => true, (e) => (console.log(e.stdout, e.stderr), false));
+  check(b, "npm run build");
+  for (const f of ["dist/cli/rex-bot.js", "dist/cli/bridge.js"]) {
+    const m = ((await stat(join(ROOT, f)).catch(() => null))?.mode ?? 0) & 0o777;
+    check((m & 0o111) !== 0, `after npm run build, ${f} is executable (mode ${m.toString(8)})`);
+  }
+}
 
 // ---- sandbox ----
 const SB = await mkdtemp(join(tmpdir(), "rex-bot-sandbox-"));
@@ -265,28 +277,42 @@ const purge = await cli(["uninstall", "--yes", "--purge"]);
 check(purge.code === 0 && !(await stat(join(SB, ".config/rex-bot-bridge")).catch(() => null)), "uninstall --purge deletes the state dir");
 check((await readdir(join(SB, ".config/rex/rex-bot-backups")).catch(() => [])).length >= 2, "uninstall --purge keeps the init.lua backups");
 
-// ---- 7. package: npm pack → global install into a temp prefix → the bin runs ----
+// ---- 7. package: a copy of the repo with NO dist → npm pack (prepare must build it) → install → run ----
 {
   const pkgVersion = JSON.parse(await readFile(join(ROOT, "package.json"), "utf8")).version;
+  const copy = join(SB, "repo-copy");
   const packDir = join(SB, "pack");
   const prefix = join(SB, "npm-prefix");
   await mkdir(packDir);
+  // The files git would ship (tracked + untracked, not ignored): no dist/, no node_modules/.
+  const files = (await run("git", ["ls-files", "-co", "--exclude-standard", "-z"], { cwd: ROOT })).stdout.split("\0").filter(Boolean);
+  for (const f of files) {
+    if (!(await stat(join(ROOT, f)).catch(() => null))?.isFile()) continue; // deleted in the work tree
+    await mkdir(dirname(join(copy, f)), { recursive: true });
+    await copyFile(join(ROOT, f), join(copy, f));
+  }
+  await symlink(join(ROOT, "node_modules"), join(copy, "node_modules"));
+  check(!(await stat(join(copy, "dist")).catch(() => null)), "repo copy has no dist/ before npm pack");
   // Only this sandbox: never the real global prefix.
   const npmEnv = { ...process.env, npm_config_prefix: prefix, NPM_CONFIG_PREFIX: prefix };
   delete npmEnv.npm_config_global;
-  const packed = await run("npm", ["pack", "--pack-destination", packDir, "--loglevel=error"], { cwd: ROOT, env: npmEnv, timeout: 180_000 }).then(
+  const packed = await run("npm", ["pack", "--pack-destination", packDir, "--loglevel=error"], { cwd: copy, env: npmEnv, timeout: 180_000 }).then(
     (r) => r.stdout.trim().split("\n").pop(),
     (e) => (console.log(e.stderr), null),
   );
-  check(!!packed, `npm pack produced ${packed}`);
+  check(!!packed && !!(await stat(join(copy, "dist/cli/rex-bot.js")).catch(() => null)), `npm pack ran prepare (built dist/) and produced ${packed}`);
+  for (const f of ["dist/cli/rex-bot.js", "dist/cli/bridge.js"]) {
+    const m = ((await stat(join(copy, f)).catch(() => null))?.mode ?? 0) & 0o777;
+    check((m & 0o111) !== 0, `prepare's build left ${f} executable (mode ${m.toString(8)})`);
+  }
+  const listing = await run("tar", ["-tvzf", join(packDir, packed ?? "missing.tgz")]).then((r) => r.stdout, () => "");
+  check(/^-rwx.* package\/dist\/cli\/rex-bot\.js$/m.test(listing), "the tarball has dist/cli/rex-bot.js with its exec bit");
   const inst = await run("npm", ["install", "-g", "--prefix", prefix, "--no-audit", "--no-fund", "--loglevel=error", join(packDir, packed ?? "missing.tgz")], { env: npmEnv, timeout: 180_000 }).then(
     () => true,
     (e) => (console.log(e.stderr), false),
   );
   check(inst, `npm i -g --prefix <sandbox> ${packed}`);
   const bin = join(prefix, "bin/rex-bot");
-  const mode = (await stat(bin).catch(() => null))?.mode ?? 0;
-  check((mode & 0o111) !== 0, `installed bin is executable (mode ${(mode & 0o777).toString(8)})`);
   const ver = await run(bin, ["--version"]).then((r) => r.stdout.trim(), (e) => `error: ${e.message}`);
   check(ver === pkgVersion, `<prefix>/bin/rex-bot --version prints ${ver} (package.json ${pkgVersion})`);
 }
