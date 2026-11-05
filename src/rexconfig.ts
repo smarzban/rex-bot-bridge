@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import type { Runner } from "./rex.js";
 
@@ -55,6 +55,15 @@ export function hasLegacyInline(content: string): boolean {
   return /name\s*=\s*["'](bot_watch_toggle|bot_watch_list)["']/.test(outside);
 }
 
+async function readRaw(path: string): Promise<Buffer | null> {
+  try {
+    return await readFile(path);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw e;
+  }
+}
+
 async function readOrNull(path: string): Promise<string | null> {
   try {
     return await readFile(path, "utf8");
@@ -76,7 +85,7 @@ export type RexConfigResult =
   | { status: "legacy-inline" }
   | { status: "check-failed"; backup?: string; detail: string };
 
-async function backup(opts: RexConfigOptions, content: string): Promise<string> {
+async function backup(opts: RexConfigOptions, content: Buffer): Promise<string> {
   await mkdir(opts.backupsDir, { recursive: true, mode: 0o700 });
   const stamp = (opts.now?.() ?? new Date()).toISOString().replace(/[:.]/g, "-");
   const path = join(opts.backupsDir, `${basename(opts.initPath)}.${stamp}`);
@@ -93,38 +102,50 @@ export async function checkConfig(rex: Runner, path: string): Promise<string | n
 }
 
 /**
- * Writes `content` to init.lua, runs `rex config check`, and puts the old file back if the check fails.
+ * Writes `content` to init.lua, runs `rex config check`, and puts the old file back (byte for byte, or
+ * deletes it if there was none) when the check fails, or when writing or checking throws (timeout,
+ * spawn failure, output overflow). A throw is re-raised after the restore.
  */
 async function writeChecked(
   opts: RexConfigOptions,
-  before: string | null,
+  before: Buffer | null,
   content: string,
   ok: "installed" | "removed",
 ): Promise<RexConfigResult> {
   const bak = before !== null ? await backup(opts, before) : undefined;
-  await mkdir(dirname(opts.initPath), { recursive: true });
-  await writeFile(opts.initPath, content);
-  const complaint = await checkConfig(opts.rex, opts.initPath);
+  const restore = async () => {
+    if (before !== null) await writeFile(opts.initPath, before);
+    else await unlink(opts.initPath).catch(() => {});
+  };
+  let complaint: string | null;
+  try {
+    await mkdir(dirname(opts.initPath), { recursive: true });
+    await writeFile(opts.initPath, content);
+    complaint = await checkConfig(opts.rex, opts.initPath);
+  } catch (e) {
+    await restore();
+    throw new Error(`could not validate ${opts.initPath} (${(e as Error).message}); restored the previous file`);
+  }
   if (complaint === null) return { status: ok, backup: bak };
-  if (bak) await copyFile(bak, opts.initPath);
-  else await unlink(opts.initPath).catch(() => {});
+  await restore();
   return { status: "check-failed", backup: bak, detail: complaint };
 }
 
 /** Adds (or refreshes) the marked block that loads our actions file. */
 export async function installBlock(opts: RexConfigOptions & { actionsPath: string }): Promise<RexConfigResult> {
-  const before = await readOrNull(opts.initPath);
-  const current = before ?? "";
+  const raw = await readRaw(opts.initPath);
+  const current = raw?.toString("utf8") ?? "";
   if (hasLegacyInline(current)) return { status: "legacy-inline" };
   const next = upsertBlock(current, renderBlock(opts.actionsPath));
-  if (next === before) return { status: "unchanged" };
-  return writeChecked(opts, before, next, "installed");
+  if (raw !== null && next === current) return { status: "unchanged" };
+  return writeChecked(opts, raw, next, "installed");
 }
 
 export async function uninstallBlock(opts: RexConfigOptions): Promise<RexConfigResult> {
-  const before = await readOrNull(opts.initPath);
-  if (before === null || !hasBlock(before)) return { status: "absent" };
-  return writeChecked(opts, before, removeBlock(before), "removed");
+  const raw = await readRaw(opts.initPath);
+  const before = raw?.toString("utf8") ?? null;
+  if (raw === null || before === null || !hasBlock(before)) return { status: "absent" };
+  return writeChecked(opts, raw, removeBlock(before), "removed");
 }
 
 /** Doctor: is our block there and pointing at an existing file? */

@@ -36,21 +36,59 @@ export function shellCommand(bin: string, args: string[]): string {
   return [bin, ...args].map(q).join(" ");
 }
 
-/** Where `servePath` on :443 currently proxies to (e.g. http://127.0.0.1:7400), or null. */
-export async function serveTarget(ts: Runner, servePath: string): Promise<string | null> {
-  const r = await ts(["serve", "status", "--json"], { timeoutMs: 10_000 }).catch(() => null);
-  if (!r || r.code !== 0) return null;
+/**
+ * What `servePath` on :443 is served by right now:
+ * - absent:   nothing is mapped there (safe to add our mapping),
+ * - occupied: some handler is there (a proxy, a file path, a text response, or one we don't recognise),
+ * - unknown:  `tailscale serve status` failed or printed something we can't parse.
+ */
+export type ServeTarget =
+  | { kind: "absent" }
+  | { kind: "occupied"; target: string }
+  | { kind: "unknown"; reason: string };
+
+interface ServeHandler {
+  Proxy?: string;
+  Path?: string;
+  Text?: string;
+  [k: string]: unknown;
+}
+
+export function describeHandler(h: ServeHandler): string {
+  if (typeof h.Proxy === "string") return h.Proxy.replace(/\/$/, "");
+  if (typeof h.Path === "string") return `files at ${h.Path}`;
+  if (typeof h.Text === "string") return "a static text response";
+  const keys = Object.keys(h);
+  return keys.length ? `an unrecognised handler (${keys.join(", ")})` : "an empty handler";
+}
+
+export async function serveTarget(ts: Runner, servePath: string): Promise<ServeTarget> {
+  const r = await ts(["serve", "status", "--json"], { timeoutMs: 10_000 }).catch((e: Error) => e);
+  if (r instanceof Error) return { kind: "unknown", reason: r.message };
+  if (r.code !== 0) return { kind: "unknown", reason: (r.stderr || r.stdout).trim() || `exit ${r.code}` };
+  let j: unknown;
   try {
-    const j = JSON.parse(r.stdout || "{}") as { Web?: Record<string, { Handlers?: Record<string, { Proxy?: string }> }> };
-    for (const [hostPort, web] of Object.entries(j.Web ?? {})) {
-      if (!hostPort.endsWith(":443")) continue;
-      const h = web.Handlers?.[servePath];
-      if (h?.Proxy) return h.Proxy.replace(/\/$/, "");
-    }
+    j = JSON.parse(r.stdout.trim() || "{}");
   } catch {
-    /* unparsable */
+    return { kind: "unknown", reason: "unparsable `tailscale serve status --json` output" };
   }
-  return null;
+  if (!j || typeof j !== "object" || Array.isArray(j)) return { kind: "unknown", reason: "unexpected serve status shape" };
+  const web = (j as { Web?: unknown }).Web;
+  if (web === undefined || web === null) return { kind: "absent" };
+  if (typeof web !== "object") return { kind: "unknown", reason: "unexpected serve status shape" };
+  for (const [hostPort, site] of Object.entries(web as Record<string, { Handlers?: Record<string, ServeHandler> }>)) {
+    if (!hostPort.endsWith(":443")) continue;
+    const h = site?.Handlers?.[servePath];
+    if (h === undefined) continue;
+    if (!h || typeof h !== "object") return { kind: "occupied", target: "an unrecognised handler" };
+    return { kind: "occupied", target: describeHandler(h) };
+  }
+  return { kind: "absent" };
+}
+
+/** True when servePath already proxies to `desired`. */
+export function servesDesired(t: ServeTarget, desired: string): boolean {
+  return t.kind === "occupied" && t.target === desired;
 }
 
 export function bridgeUrl(dnsName: string | undefined, servePath: string): string {

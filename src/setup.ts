@@ -9,7 +9,7 @@ import type { Prompter } from "./prompt.js";
 import { installBlock } from "./rexconfig.js";
 import { ensurePrivateDir, MODES, readSettings, setKey, settingsExist, writeSettings, type Mode } from "./settings.js";
 import { installSkills } from "./skills.js";
-import { serveArgs, serveTarget, shellCommand, tailscaleStatus } from "./tailscale.js";
+import { serveArgs, servesDesired, serveTarget, shellCommand, tailscaleStatus } from "./tailscale.js";
 import { ensureToken } from "./token.js";
 import { parseWatched, WatchFile } from "./watch.js";
 
@@ -170,8 +170,13 @@ export async function setup(ctx: Ctx, flags: SetupFlags, p: Prompter): Promise<n
   // 5. Rex actions in init.lua
   if (flags.rexConfig) {
     const actionsPath = join(ctx.pkgRoot, "lua/rex-bot-actions.lua");
-    const r = await installBlock({ initPath: paths.rexInitLua, backupsDir: paths.backupsDir, actionsPath, rex: ctx.rex });
-    if (r.status === "legacy-inline") {
+    const r = await installBlock({ initPath: paths.rexInitLua, backupsDir: paths.backupsDir, actionsPath, rex: ctx.rex }).catch(
+      (e: Error) => ({ status: "error" as const, detail: e.message }),
+    );
+    if (r.status === "error") {
+      failed = true;
+      ctx.err(`❌ ${r.detail}`);
+    } else if (r.status === "legacy-inline") {
       warn(
         `${paths.rexInitLua} already defines bot_watch_toggle / bot_watch_list inline (v1).\n` +
           "    Remove that old block by hand (the two rex.action{…} entries and their helpers), then run `rex-bot setup` again.",
@@ -221,10 +226,14 @@ export async function setup(ctx: Ctx, flags: SetupFlags, p: Prompter): Promise<n
     } else {
       const current = await serveTarget(ctx.tailscale, s.servePath);
       let run = false;
-      if (current === desired) ok(`Tailscale Serve already maps ${s.servePath} → ${desired}`);
-      else if (current) {
-        warn(`Tailscale Serve already maps ${s.servePath} → ${current}.`);
+      if (servesDesired(current, desired)) ok(`Tailscale Serve already maps ${s.servePath} → ${desired}`);
+      else if (current.kind === "occupied") {
+        // Never overwritten by default (so --yes leaves it alone).
+        warn(`Tailscale Serve already maps ${s.servePath} → ${current.target}.`);
         run = await p.confirm(`Replace it with ${desired}?`, false);
+      } else if (current.kind === "unknown") {
+        warn(`Could not read Tailscale Serve's current config (${current.reason}), so setup can't tell whether ${s.servePath} is in use.`);
+        run = await p.confirm(`Run \`${cmd}\` anyway (it replaces anything at ${s.servePath})?`, false);
       } else {
         say(`\nTo expose the bridge on your tailnet (tailnet only, not Funnel), setup will run:\n    ${cmd}`);
         run = await p.confirm("Run it now?", true);
@@ -236,7 +245,7 @@ export async function setup(ctx: Ctx, flags: SetupFlags, p: Prompter): Promise<n
           failed = true;
           ctx.err(`❌ tailscale serve failed: ${(r.stderr || r.stdout).trim()}`);
         }
-      } else if (current !== desired) {
+      } else if (!servesDesired(current, desired)) {
         say(`   Skipped. Run it later:\n    ${cmd}`);
       }
     }

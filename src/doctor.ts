@@ -130,7 +130,8 @@ export async function runDoctor(ctx: Ctx, opts: { testWebhook: boolean }): Promi
   else add("tailscale", "ok", `Tailscale up as ${ts.dnsName}`);
 
   if (ts.running) {
-    const target = await serveTarget(ctx.tailscale, s.servePath);
+    const t = await serveTarget(ctx.tailscale, s.servePath);
+    const target = t.kind === "occupied" ? t.target : null;
     const desired = `http://127.0.0.1:${s.port}`;
     if (serveSkipped && target !== desired) {
       add("serve", "warn", `Tailscale Serve not set up by setup (--no-serve)${target ? `; ${s.servePath} → ${target}` : ""}`, serveCmd);
@@ -146,7 +147,13 @@ export async function runDoctor(ctx: Ctx, opts: { testWebhook: boolean }): Promi
           remote.status === 502 ? "502 means the bridge is down: check the bridge service" : "tailscale serve status",
         );
     } else {
-      add("serve", "fail", target ? `Tailscale Serve ${s.servePath} → ${target} (expected ${desired})` : `Tailscale Serve has no ${s.servePath} mapping`, serveCmd);
+      const what =
+        t.kind === "unknown"
+          ? `Could not read Tailscale Serve status (${t.reason})`
+          : target
+            ? `Tailscale Serve ${s.servePath} → ${target} (expected ${desired})`
+            : `Tailscale Serve has no ${s.servePath} mapping`;
+      add("serve", "fail", what, t.kind === "unknown" ? "tailscale serve status" : serveCmd);
     }
   }
 

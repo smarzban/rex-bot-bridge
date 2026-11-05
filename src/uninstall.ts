@@ -6,7 +6,7 @@ import type { Prompter } from "./prompt.js";
 import { uninstallBlock } from "./rexconfig.js";
 import { readSettings } from "./settings.js";
 import { uninstallSkills } from "./skills.js";
-import { serveOffArgs, serveTarget, shellCommand } from "./tailscale.js";
+import { serveOffArgs, servesDesired, serveTarget, shellCommand } from "./tailscale.js";
 
 export interface UninstallFlags {
   yes: boolean;
@@ -29,8 +29,13 @@ export async function uninstall(ctx: Ctx, flags: UninstallFlags, p: Prompter): P
   const removed = await uninstallServices(paths, ctx.launchctl);
   ok(removed.length ? `Services stopped and removed: ${removed.join(", ")}` : "No services installed");
 
-  const r = await uninstallBlock({ initPath: paths.rexInitLua, backupsDir: paths.backupsDir, rex: ctx.rex });
-  if (r.status === "removed") {
+  const r = await uninstallBlock({ initPath: paths.rexInitLua, backupsDir: paths.backupsDir, rex: ctx.rex }).catch(
+    (e: Error) => ({ status: "error" as const, detail: e.message }),
+  );
+  if (r.status === "error") {
+    failed = true;
+    ctx.err(`❌ ${r.detail}`);
+  } else if (r.status === "removed") {
     ok(`Removed the rex-bot-bridge block from ${paths.rexInitLua}${"backup" in r && r.backup ? ` (backup: ${r.backup})` : ""}`);
     if (!isSandboxHome(ctx, userInfo().homedir)) await ctx.rex(["config", "reload"]);
   } else if (r.status === "check-failed") {
@@ -43,7 +48,8 @@ export async function uninstall(ctx: Ctx, flags: UninstallFlags, p: Prompter): P
 
   const desired = `http://127.0.0.1:${s.port}`;
   const target = ctx.tailscaleBin ? await serveTarget(ctx.tailscale, s.servePath) : null;
-  if (target === desired) {
+  // Only our own mapping is ever offered for removal; a foreign or unreadable one is left alone.
+  if (target && servesDesired(target, desired)) {
     const cmd = shellCommand("tailscale", serveOffArgs(s.servePath));
     const off = flags.serveOff || (p.interactive && (await p.confirm(`Remove the Tailscale Serve mapping ${s.servePath}?`, false)));
     if (off) {
