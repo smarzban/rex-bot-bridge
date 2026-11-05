@@ -14,6 +14,8 @@ export interface Settings {
   webhook: { url?: string; key?: string; header?: string };
   /** What setup chose not to install, so doctor reports those checks as skipped instead of failed. */
   skipped?: { services?: boolean; serve?: boolean };
+  /** When setup imported the v1 opt-in list. Set once; later runs never import it again. */
+  migratedV1At?: string;
 }
 
 export const DEFAULTS: Settings = {

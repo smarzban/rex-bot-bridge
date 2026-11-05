@@ -17,6 +17,8 @@ import { setup, type SetupFlags } from "../src/setup.js";
 import { serveTarget } from "../src/tailscale.js";
 import { ensureToken } from "../src/token.js";
 import { uninstall } from "../src/uninstall.js";
+import { runDoctor } from "../src/doctor.js";
+import { readSettings } from "../src/settings.js";
 import { WatchFile } from "../src/watch.js";
 import { B1, B3, FakeRex, S1, S2, tempDir } from "./helpers.js";
 
@@ -176,7 +178,7 @@ test("K3: a rejecting check deletes an init.lua that did not exist before", asyn
 
 // ---------- K4: state files are 0600 from creation ----------
 
-test("K4: watched is created 0600 (even with umask 0) and keeps an existing mode on replace", async () => {
+test("K4/R3: watched is created 0600 (even with umask 0) and a looser existing file is tightened on replace", async () => {
   const dir = await tempDir();
   const old = process.umask(0);
   try {
@@ -186,9 +188,9 @@ test("K4: watched is created 0600 (even with umask 0) and keeps an existing mode
     assert.equal((await stat(join(dir, "state"))).mode & 0o777, 0o700);
     await w.add(S2);
     assert.equal((await stat(w.path)).mode & 0o777, 0o600);
-    await chmod(w.path, 0o640);
+    await chmod(w.path, 0o644); // as left by a pre-0.2.0 install
     await w.remove(S1);
-    assert.equal((await stat(w.path)).mode & 0o777, 0o640, "existing mode kept");
+    assert.equal((await stat(w.path)).mode & 0o777, 0o600, "tightened to 0600 on replace");
   } finally {
     process.umask(old);
   }
@@ -373,4 +375,57 @@ test("K8 uninstall: `tailscale serve off` only for our own mapping, and only whe
   assert.equal(await offCalls(ours, { yes: false, serveOff: false }, scriptedPrompter()), 0, "interactive default is no");
   assert.equal(await offCalls(ours, { yes: true, serveOff: true }, makePrompter(true)), 1);
   assert.equal(await offCalls(ours, { yes: false, serveOff: false }, scriptedPrompter({ "Remove the Tailscale Serve": true })), 1);
+});
+
+// ---------- Fix round 2 ----------
+
+test("R1 setup: the v1 list is imported once; an unwatched session stays unwatched on re-run", async () => {
+  const f = await fakeCtx(ok("{}"));
+  const legacy = f.ctx.paths.legacyWatchedFile;
+  await mkdir(join(legacy, ".."), { recursive: true });
+  await writeFile(legacy, `# v1\n${S1}\n${S2}\n`);
+  const flags = { ...FLAGS, serve: false };
+  assert.equal(await setup(f.ctx, flags, makePrompter(true)), 0);
+  const watch = new WatchFile(f.ctx.paths.watchedFile);
+  assert.deepEqual(await watch.list(), [S1, S2]);
+  assert.ok((await readSettings(f.ctx.paths.configFile)).migratedV1At, "marker recorded");
+
+  await watch.remove(S1); // the human unwatches it in v2
+  assert.equal(await setup(f.ctx, flags, makePrompter(true)), 0);
+  assert.deepEqual(await watch.list(), [S2], "re-run must not re-import");
+  // Even with the v2 list deleted, the recorded import is not repeated.
+  await writeFile(f.ctx.paths.watchedFile, "");
+  await setup(f.ctx, flags, makePrompter(true));
+  assert.deepEqual(await watch.list(), []);
+});
+
+test("R1 setup: an existing v2 watched file blocks the v1 import even without a marker", async () => {
+  const f = await fakeCtx(ok("{}"));
+  await mkdir(join(f.ctx.paths.legacyWatchedFile, ".."), { recursive: true });
+  await writeFile(f.ctx.paths.legacyWatchedFile, `${S1}\n`);
+  await mkdir(f.ctx.paths.stateDir, { recursive: true });
+  await writeFile(f.ctx.paths.watchedFile, `${S2}\n`);
+  await setup(f.ctx, { ...FLAGS, serve: false }, makePrompter(true));
+  assert.deepEqual(await new WatchFile(f.ctx.paths.watchedFile).list(), [S2]);
+  assert.ok((await readSettings(f.ctx.paths.configFile)).migratedV1At);
+});
+
+test("R3 doctor: warns when watched/heartbeat/token/config.json are not 0600", async () => {
+  const f = await fakeCtx(ok("{}"));
+  const p = f.ctx.paths;
+  await ensureToken(p.tokenFile);
+  await writeSettings(p.configFile, { ...DEFAULTS });
+  await writeFile(p.watchedFile, `${S1}\n`, { mode: 0o600 });
+  await writeFile(p.heartbeatFile, new Date().toISOString() + "\n", { mode: 0o600 });
+  await chmod(p.watchedFile, 0o600);
+  await chmod(p.heartbeatFile, 0o600);
+  const level = async () => (await runDoctor(f.ctx, { testWebhook: false })).find((c) => c.id === "file_modes");
+  assert.equal((await level())?.level, "ok");
+  await chmod(p.watchedFile, 0o644);
+  await chmod(p.heartbeatFile, 0o644);
+  const c = await level();
+  assert.equal(c?.level, "warn");
+  assert.match(c!.detail, /watched \(644\).*heartbeat \(644\)/);
+  assert.ok(!c!.detail.includes("token"), "token and config.json are still 600");
+  assert.match(c!.fix ?? "", /^chmod 600 '.*watched' '.*heartbeat'$/);
 });

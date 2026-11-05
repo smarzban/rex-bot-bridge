@@ -114,9 +114,18 @@ export async function setup(ctx: Ctx, flags: SetupFlags, p: Prompter): Promise<n
   const hadSettings = await settingsExist(paths.configFile);
   let s = await readSettings(paths.configFile);
 
-  const migrated = await migrateWatched(paths.legacyWatchedFile, paths.watchedFile);
-  if (migrated.length) {
-    ok(`Imported ${migrated.length} watched session(s) from ${paths.legacyWatchedFile} (that file was left in place).`);
+  // The v1 list is imported once. Re-importing on every run would give the bot back sessions the
+  // human has since unwatched, so a recorded import or an existing v2 list means it's skipped.
+  if (!s.migratedV1At && existsSync(paths.legacyWatchedFile)) {
+    if (!existsSync(paths.watchedFile)) {
+      const migrated = await migrateWatched(paths.legacyWatchedFile, paths.watchedFile);
+      if (migrated.length) {
+        ok(`Imported ${migrated.length} watched session(s) from ${paths.legacyWatchedFile} (that file was left in place).`);
+      }
+    } else {
+      say(`   ${paths.watchedFile} already exists, so the v1 list ${paths.legacyWatchedFile} was not imported.`);
+    }
+    s.migratedV1At = new Date().toISOString();
   }
 
   if (flags.mode) {

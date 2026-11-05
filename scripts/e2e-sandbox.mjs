@@ -7,7 +7,7 @@
 // Creates two Rex sessions labelled `e2e-sandbox-*`, and kills only those. Never touches the real
 // ~/.config, the real init.lua, launchd, or tailscale serve.
 import { spawn, execFile } from "node:child_process";
-import { mkdtemp, mkdir, readFile, writeFile, readdir, stat } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, writeFile, readdir, stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -162,10 +162,11 @@ try {
   const tag = Math.random().toString(36).slice(2, 7);
   const watchedS = await mk(`e2e-sandbox-${tag}-watched`);
   const otherS = await mk(`e2e-sandbox-${tag}-other`);
+  await chmod(join(stateDir, "watched"), 0o644); // as a pre-0.2.0 install would have left it
   const add = await cli(["watch", "add", watchedS.session_id]);
   check(add.stdout.startsWith("watching"), `rex-bot watch add: ${add.stdout.trim()}`);
   const wMode = (await stat(join(stateDir, "watched")).catch(() => null))?.mode & 0o777;
-  check(wMode === 0o600, `watched is 0600 (got ${wMode?.toString(8)})`);
+  check(wMode === 0o600, `watched tightened from 0644 to 0600 on write (got ${wMode?.toString(8)})`);
   await sleep(1500); // let the shells start
 
   client = new Client({ name: "e2e-sandbox", version: "0" });

@@ -140,8 +140,13 @@ local function beat()
   local tmp = HEARTBEAT_FILE .. ".tmp"
   local f = io.open(tmp, "w")
   if not f then return end
-  local r = rex.exec({ "/bin/chmod", "600", tmp })
-  if not r or r.code ~= 0 then f:close(); os.remove(tmp); return end
+  -- pcall: beat() runs at load, so a throw here would kill the watcher (and launchd would loop it).
+  local ok, r = pcall(rex.exec, { "/bin/chmod", "600", tmp })
+  if not ok or not r or r.code ~= 0 then
+    f:close(); os.remove(tmp)
+    print("bot-watch: heartbeat skipped: cannot chmod " .. tmp .. ": " .. tostring(ok and (r and r.stderr) or r))
+    return
+  end
   f:write(os.date("!%Y-%m-%dT%H:%M:%SZ"), "\n"); f:close()
   os.rename(tmp, HEARTBEAT_FILE)
 end

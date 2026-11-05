@@ -1,4 +1,4 @@
-import { chmod, readFile, rename, stat, writeFile, mkdir, unlink } from "node:fs/promises";
+import { chmod, readFile, rename, writeFile, mkdir, unlink } from "node:fs/promises";
 import { dirname, join, basename, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 
@@ -88,17 +88,12 @@ export class WatchFile {
 }
 
 /**
- * Write to a temp file in the same directory, then rename over the target. A new file is 0600; an
- * existing one keeps its mode. The temp file has its final mode before any content is written.
+ * Write to a temp file in the same directory, then rename over the target. The result always has
+ * `mode` (default 0600), even when replacing a looser file from an older install. The temp file has
+ * its final mode before any content is written.
  */
-export async function atomicWrite(path: string, content: string, defaultMode = 0o600): Promise<void> {
+export async function atomicWrite(path: string, content: string, mode = 0o600): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  let mode = defaultMode;
-  try {
-    mode = (await stat(path)).mode & 0o777;
-  } catch {
-    /* new file */
-  }
   const tmp = join(dirname(path), `.${basename(path)}.${randomBytes(6).toString("hex")}.tmp`);
   try {
     await writeFile(tmp, "", { mode, flag: "wx" });
