@@ -47,7 +47,9 @@ export async function urlCommand(ctx: Ctx): Promise<number> {
     return 1;
   }
   const target = await serveTarget(ctx.tailscale, s.servePath);
-  if (!servesDesired(target, `http://127.0.0.1:${s.port}`)) {
+  if (target.kind === "unknown") {
+    ctx.err(`rex-grokbot: warning: couldn't confirm that Tailscale Serve maps ${s.servePath} to the bridge (${target.reason}).\n  fix: rex-grokbot doctor`);
+  } else if (!servesDesired(target, `http://127.0.0.1:${s.port}`)) {
     ctx.err(`rex-grokbot: warning: Tailscale Serve doesn't map ${s.servePath} to the bridge yet.\n  fix: rex-grokbot setup serve`);
   }
   ctx.out(`${bridgeUrl(ts.dnsName, s.servePath)}/mcp`);

@@ -85,20 +85,6 @@ test("token: prints exactly the token line and nothing else; --show is gone", as
   assert.equal(s.stdout, "");
 });
 
-test("token --rotate (CLI): new 43-char token on stdout only, file 600 in a 700 dir, reminder on stderr", async () => {
-  const home = await tempDir();
-  const file = join(home, ".config/rex-bot-bridge/token");
-  const r = await cli(rexBotCli, ["token", "--rotate"], { HOME: home });
-  assert.equal(r.code, 0, r.stderr);
-  const token = (await readFile(file, "utf8")).trim();
-  assert.match(token, /^[A-Za-z0-9_-]{43}$/);
-  assert.equal(r.stdout, `${token}\n`);
-  assert.ok(!r.stderr.includes(token));
-  assert.match(r.stderr, /update the Authorization header of the rex connector in Grok Bot/);
-  assert.equal((await stat(file)).mode & 0o777, 0o600);
-  assert.equal((await stat(join(home, ".config/rex-bot-bridge"))).mode & 0o777, 0o700);
-});
-
 test("serve refuses to start without a token", async () => {
   const home = await tempDir();
   const r = await cli(rexBotCli, ["serve"], { HOME: home, REX_BRIDGE_PORT: "1" });
@@ -160,9 +146,13 @@ test("CLI subprocesses get a scratch env: inherited REX_*/XDG/token overrides ne
   process.env.XDG_CONFIG_HOME = join(home, "leaked-xdg");
   process.env.REX_BOT_DIR = join(home, "leaked-dir");
   try {
-    const r = await cli(rexBotCli, ["token", "--rotate"], { HOME: home });
+    // Plain `token`, never --rotate here: the CLI uses the real launchctl, and --rotate would restart this
+    // Mac's real bridge service (rotation is covered with a fake launchctl in credentials.test.ts).
+    await mkdir(join(home, ".config/rex-bot-bridge"), { recursive: true, mode: 0o700 });
+    await writeFile(join(home, ".config/rex-bot-bridge/token"), "fake-scratch-env-token\n", { mode: 0o600 });
+    const r = await cli(rexBotCli, ["token"], { HOME: home });
     assert.equal(r.code, 0);
-    assert.equal(r.stdout, `${(await readFile(join(home, ".config/rex-bot-bridge/token"), "utf8")).trim()}\n`);
+    assert.equal(r.stdout, "fake-scratch-env-token\n");
     await assert.rejects(stat(join(home, "leaked-token")));
   } finally {
     for (const k of ["REX_BRIDGE_TOKEN_FILE", "XDG_CONFIG_HOME", "REX_BOT_DIR"]) {
