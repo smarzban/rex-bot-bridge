@@ -63,7 +63,7 @@ Other protections:
    - the token: `rex-grokbot token | pbcopy`, then paste it **once, in a private 1:1 chat** with your own bot. It goes into the connector as a static `Authorization: Bearer <token>` header, never OAuth: if the app offers to sign in, decline. If the token ever lands anywhere else (a group chat, a doc, a screenshot), rotate it with `rex-grokbot token --rotate | pbcopy` and give the bot the new one;
    - then it creates the routine and shows you its webhook URL (and key, if any).
 5. **Give the routine's webhook to this Mac:** `rex-grokbot setup webhook`
-6. **Check everything:** `rex-grokbot doctor --test-webhook` (the bot replies "rex-grokbot-bridge webhook OK"), then [opt a session in](#security-model-in-plain-words) and let an agent finish there.
+6. **Check everything:** `rex-grokbot doctor --test-webhook` (the bot replies "rex-grokbot-bridge webhook OK"), then [opt a session or pane in](#security-model-in-plain-words) and let an agent finish there.
 
 Keep the Mac awake with Rex running while you do this.
 

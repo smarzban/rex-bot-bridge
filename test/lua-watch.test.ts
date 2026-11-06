@@ -33,7 +33,9 @@ async function checkLua(dir: string, body: string): Promise<void> {
     env: childEnv({ HOME: home, REX_GROKBOT_CLI: "/nonexistent/cli.js", REX_GROKBOT_DIR: dir }),
   }).catch((e: { stdout: string; stderr: string }) => e);
   // The watcher prints log lines while it loads; the report is the JSON object after them.
-  const out = JSON.parse(r.stdout.slice(r.stdout.search(/^\{/m))) as { diagnostics?: { severity: string; message: string }[] };
+  const idx = r.stdout.search(/^\{/m);
+  assert.ok(idx >= 0, `rex config check gave no report: ${r.stdout} ${r.stderr}`);
+  const out = JSON.parse(r.stdout.slice(idx)) as { diagnostics?: { severity: string; message: string }[] };
   assert.deepEqual(out.diagnostics ?? [], [], `lua complained: ${r.stdout} ${r.stderr}`);
 }
 
