@@ -23,5 +23,6 @@ jobs:
       # --ignore-scripts: `prepare` runs the build, which has its own step below.
       - run: npm ci --ignore-scripts
       - run: npm run typecheck
-      - run: npm test
+      # Build before testing: the CLI tests run dist/cli/rex-grokbot.js.
       - run: npm run build
+      - run: npm test

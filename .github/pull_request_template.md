@@ -5,8 +5,8 @@
 ## Test plan
 
 - [ ] `npm run typecheck`
-- [ ] `npm test`
 - [ ] `npm run build`
+- [ ] `npm test`
 - [ ] `npm run e2e:sandbox` (real Rex; when the change touches Rex, setup, sharing or the bridge)
 - [ ] `npm run docs:commands` if `src/cli/help.ts` changed
 - [ ] CHANGELOG entry and version bump, if this is a release

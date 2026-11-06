@@ -31,11 +31,11 @@ webhook. `rex-grokbot setup` installs both as launchd services. User docs: [READ
 - Typecheck: `npm run typecheck`
 - Test: `npm test` (unit tests with a fake `rex`; the Lua tests skip when `rex` isn't on PATH, the
   pty tests when `python3` is missing)
-- Build: `npm run build` (to `dist/`)
+- Build: `npm run build` (to `dist/`; run it before `npm test`, whose CLI tests run the built CLI)
 - Live check with a real Rex: `npm run e2e:sandbox` (builds, uses a temp HOME, creates and kills only
   its own `e2e-sandbox-*` sessions; never touches launchd, Tailscale Serve, the real `~/.config` or
   `init.lua`)
-- Canonical verify: `npm run typecheck && npm test && npm run build`, plus `npm run e2e:sandbox`
+- Canonical verify: `npm run typecheck && npm run build && npm test` (the CLI tests run `dist/`), plus `npm run e2e:sandbox`
   before a release. CI (`.github/workflows/ci.yml`) runs the first three on macOS.
 
 ## Conventions

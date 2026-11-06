@@ -18,8 +18,8 @@ npm install
 
 ```sh
 npm run typecheck
+npm run build          # before npm test: the CLI tests run the built dist/
 npm test               # unit tests with a fake rex; Lua tests skip without rex, pty tests without python3
-npm run build
 npm run e2e:sandbox    # real Rex, temp HOME, no launchd or Tailscale changes; kills only its own sessions
 ```
 
@@ -37,6 +37,6 @@ Don't test against your live install (`~/.config/rex-grokbot-bridge`, your `init
 ## Pull requests
 
 - Branch from `main`, keep commits logical, and open the PR against `main`.
-- Fill in the PR template's test plan; CI (typecheck, test, build on macOS) must pass.
+- Fill in the PR template's test plan; CI (typecheck, build, test on macOS) must pass.
 - User-visible changes get a line in [CHANGELOG.md](CHANGELOG.md).
 - Security problems: report privately, see [SECURITY.md](SECURITY.md).
