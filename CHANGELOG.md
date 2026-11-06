@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.7.3 — 2026-11-06
+
+Installs only released versions, and releases are cut by pushing a tag.
+
+- **The installer installs the latest release, never `main`.** When the package isn't on npm, `install.sh` now
+  installs the latest GitHub Release (its tag, from the GitHub API) instead of building `main`; if it can't find
+  a release it stops with a clear message and installs nothing. An npm `latest` that isn't a plain `X.Y.Z`
+  release (a placeholder or prerelease) no longer counts as published. It prints what it installs and from
+  where. `REX_GROKBOT_VERSION` still pins a version or tag; `REX_GROKBOT_SOURCE=github REX_GROKBOT_VERSION=main`
+  installs unreleased code, with a warning.
+- **Tag-driven releases:** pushing `vX.Y.Z` runs `.github/workflows/release.yml`, which checks the tag matches
+  `package.json` and is on `main` and that CHANGELOG.md has the entry (`scripts/release.mjs`, tested), runs
+  typecheck/build/test, publishes to npm with trusted publishing (OIDC, provenance; skipped when the version is
+  already there) and creates the GitHub Release from the CHANGELOG section.
+- **Docs:** release steps and the one-time npm trusted-publisher setup in CONTRIBUTING.md and AGENTS.md; how to
+  pin a version or try `main` in `docs/setup.md`.
+
 ## 0.7.2 — 2026-11-06
 
 First release on npm: `npm i -g rex-grokbot-bridge` now works alongside the curl installer (which installs from

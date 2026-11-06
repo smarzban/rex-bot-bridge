@@ -53,8 +53,15 @@ webhook. `rex-grokbot setup` installs both as launchd services. User docs: [READ
   relative links and anchors).
 - **Safety in dev:** don't touch a live install (the real `~/.config/rex-grokbot-bridge`, `init.lua`,
   launchd services, `tailscale serve`) or Rex sessions you didn't create. Use `e2e:sandbox`.
-- **Releases:** each release bumps `package.json` (`npm version X.Y.Z --no-git-tag-version`; the CLI and
-  the MCP server read their version from it) and adds a dated entry at the top of [CHANGELOG.md](CHANGELOG.md). Release = merge the PR to `main`, then
-  the owner runs `npm publish`. Never run `npm publish` or `npm login` as an agent.
+- **Releases:** users only ever get releases (`install.sh` and npm both install the latest release, never
+  `main`). Each release bumps `package.json` (`npm version X.Y.Z --no-git-tag-version`; the CLI and the MCP
+  server read their version from it) and adds a dated `## X.Y.Z — YYYY-MM-DD` entry at the top of
+  [CHANGELOG.md](CHANGELOG.md), in a PR. After it merges, the owner tags the merged commit:
+  `git tag -a vX.Y.Z -m vX.Y.Z && git push origin vX.Y.Z`. That runs `.github/workflows/release.yml`: it checks
+  the tag matches `package.json` and is on `main` and the CHANGELOG entry exists (`scripts/release.mjs`), runs
+  typecheck/build/test, publishes to npm with trusted publishing (OIDC, no token; skipped if that version is
+  already on npm) and creates the GitHub Release from the CHANGELOG section. Never run `npm publish` or
+  `npm login` as an agent, and push a release tag only when the owner asks. One-time owner setup:
+  [CONTRIBUTING.md](CONTRIBUTING.md#releases).
 - **Flow:** branch from `main`, logical commits, PR against `main` with proof (tests, typecheck,
   build, e2e:sandbox where it applies). CI must be green.
