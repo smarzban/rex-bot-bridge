@@ -64,5 +64,5 @@ One-time setup (owner): npm publishes through
 [trusted publishing](https://docs.npmjs.com/trusted-publishers) (OIDC), so there is no npm token secret. On
 npmjs.com, open the package → Settings → Trusted publishing → GitHub Actions, and enter organization or user
 `smarzban`, repository `rex-grokbot-bridge`, workflow filename `release.yml` (no environment). Under
-**Allowed actions**, allow `npm publish` (configs made after Sep 3, 2026 allow only `npm stage publish` by
-default, and the workflow runs `npm publish`).
+**Allowed actions**, select `npm publish` (required; a stage-only config rejects the workflow's
+`npm publish`).
