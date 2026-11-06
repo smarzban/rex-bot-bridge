@@ -1,4 +1,4 @@
--- bot-watch.lua: forward agent status changes in opted-in Rex sessions to the coordinator's webhook.
+-- bot-watch.lua: forward agent status changes in opted-in Rex sessions and panes to the coordinator's webhook.
 --
 -- Started by `rex-grokbot watch` (the com.rexgrokbotbridge.watch launchd service), which runs
 --   rex do --all <package>/lua/bot-watch.lua
@@ -8,7 +8,8 @@
 --   REX_GROKBOT_CLI   absolute path of dist/cli/rex-grokbot.js (its `notify` command POSTs stdin to the webhook)
 --
 -- Fires when a pane's program status *enters* done / blocked / error and stays there for DEBOUNCE
--- seconds. Works for any program that speaks OSC 7501 (Claude Code and Pi do natively).
+-- seconds, if that pane or its session is on the watch list. Works for any program that speaks
+-- OSC 7501 (Claude Code and Pi do natively).
 
 local HOME = os.getenv("HOME") or ""
 local DIR = os.getenv("REX_GROKBOT_DIR") or (HOME .. "/.config/rex-grokbot-bridge")
@@ -24,6 +25,10 @@ if not CLI or CLI == "" then
   error("REX_GROKBOT_CLI is not set; start the watcher with `rex-grokbot watch`", 0)
 end
 
+-- watchlist.lua sits next to this file.
+local HERE = (debug.getinfo(1, "S").source:gsub("^@", "")):match("^(.*)/[^/]*$") or "."
+local WL = dofile(HERE .. "/watchlist.lua")
+
 local function read_file(path)
   local f = io.open(path, "r")
   if not f then return nil end
@@ -31,15 +36,9 @@ local function read_file(path)
   return s
 end
 
--- Session IDs opted in, re-read on every check so toggling needs no restart.
-local function watched(session_id)
-  local s = read_file(WATCHED_FILE)
-  if not s then return false end
-  for line in s:gmatch("[^\n]+") do
-    local id = line:match("^%s*([^%s#]+)")
-    if id == session_id then return true end
-  end
-  return false
+-- The pane or its session is opted in. Re-read on every check so toggling needs no restart.
+local function watched(session_id, block_id)
+  return WL.covers(WL.parse(read_file(WATCHED_FILE)), session_id, block_id)
 end
 
 local function session_label(session_id)
@@ -85,7 +84,7 @@ rex.on("terminal.program_status_changed", function(ctx, ev)
   if last[key] == state then return end  -- msg/progress update, same state
   last[key] = state
   if timers[key] then timers[key]:cancel(); timers[key] = nil end
-  if not NOTIFY_STATES[state] or not watched(ctx.session_id) then return end
+  if not NOTIFY_STATES[state] or not watched(ctx.session_id, ctx.block_id) then return end
 
   local blabel, cwd = block_info(ctx.session_id, ctx.block_id)
   local payload = {
@@ -103,13 +102,13 @@ rex.on("terminal.program_status_changed", function(ctx, ev)
     cwd = cwd,
     updated_at = rec.updated_at,
   }
-  local sid = ctx.session_id
+  local sid, bid = ctx.session_id, ctx.block_id
   timers[key] = rex.after(DEBOUNCE, function()
     timers[key] = nil
     if last[key] ~= state then return end
-    -- The human may have unwatched the session during the debounce.
-    if not watched(sid) then
-      print(os.date("!%Y-%m-%dT%H:%M:%SZ") .. " " .. state .. " " .. payload.rex_block .. " skipped: session no longer watched")
+    -- The human may have unwatched the pane or session during the debounce.
+    if not watched(sid, bid) then
+      print(os.date("!%Y-%m-%dT%H:%M:%SZ") .. " " .. state .. " " .. payload.rex_block .. " skipped: no longer watched")
       return
     end
     send(payload)
