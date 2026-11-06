@@ -18,9 +18,10 @@ local function bot_read_lines()
 end
 
 -- Keeps comments and other lines; writes via a temp file + rename. The temp file is made 0600 before
--- anything is written to it, so the list is never readable by other users.
+-- anything is written to it, so the list is never readable by other users. Its name is unique, so two
+-- writers never share it.
 local function bot_write_lines(lines)
-  local tmp = BOT_SHARED .. ".tmp"
+  local tmp = string.format("%s/.shared.%d.%d.%d.tmp", BOT_DIR, os.time(), math.random(0, 999999), math.random(0, 999999))
   local f = io.open(tmp, "w")
   if not f then error("cannot write " .. BOT_SHARED .. " (run `rex-grokbot setup` first)", 0) end
   local ok, r = pcall(rex.exec, { "/bin/chmod", "600", tmp })
@@ -30,7 +31,72 @@ local function bot_write_lines(lines)
   end
   for _, line in ipairs(lines) do f:write(line, "\n") end
   f:close()
-  assert(os.rename(tmp, BOT_SHARED))
+  local renamed, err = os.rename(tmp, BOT_SHARED)
+  if not renamed then os.remove(tmp); error("cannot replace " .. BOT_SHARED .. ": " .. tostring(err), 0) end
+end
+
+-- The cross-process lock the bridge and the CLI take too (src/share.ts withShareLock): the directory
+-- <list>.lock, made with mkdir (atomic). Waits up to ~3s (60 x 50ms); a lock older than 10s is a crashed
+-- writer's and is removed, but only under the break-lock (bot_break). Same thresholds as the Node side.
+local BOT_LOCK = BOT_SHARED .. ".lock"
+local BOT_BREAK = BOT_LOCK .. ".break"
+local BOT_LOCK_TRIES, BOT_LOCK_STALE = 60, 10
+
+local function bot_exists(path)
+  local ok, r = pcall(rex.exec, { "/bin/test", "-e", path })
+  return ok and r and r.code == 0
+end
+
+-- mtime in seconds, or nil when the path is gone.
+local function bot_mtime(path)
+  local ok, r = pcall(rex.exec, { "/usr/bin/stat", "-f", "%m", path })
+  return ok and r and r.code == 0 and tonumber((r.stdout or ""):match("%d+")) or nil
+end
+
+local function bot_stale(path)
+  local m = bot_mtime(path)
+  return m ~= nil and os.time() - m > BOT_LOCK_STALE
+end
+
+-- Removes the lock only if it is still stale once we hold <lock>.break (mkdir, like the lock), so two
+-- writers that both saw the same stale lock can't both remove it: the second re-checks and finds the first
+-- one's fresh lock. A break-lock older than 10s (a breaker that crashed while holding it) is removed.
+-- Same protocol as breakStaleLock in src/share.ts. Returns true when this call removed the lock.
+local function bot_break()
+  local ok, r = pcall(rex.exec, { "/bin/mkdir", BOT_BREAK })
+  if not (ok and r and r.code == 0) then
+    if bot_stale(BOT_BREAK) then os.remove(BOT_BREAK) end
+    return false
+  end
+  local removed = false
+  if bot_stale(BOT_LOCK) then removed = os.remove(BOT_LOCK) and true or false end
+  os.remove(BOT_BREAK)
+  return removed
+end
+
+local function bot_lock()
+  for _ = 1, BOT_LOCK_TRIES do
+    local ok, r = pcall(rex.exec, { "/bin/mkdir", BOT_LOCK })
+    if ok and r and r.code == 0 then return end
+    local mtime = bot_mtime(BOT_LOCK)
+    if mtime then
+      if not (os.time() - mtime > BOT_LOCK_STALE and bot_break()) then
+        pcall(rex.exec, { "/bin/sleep", "0.05" })
+      end
+    elseif not bot_exists(BOT_LOCK) and not bot_exists(BOT_DIR) then
+      error("cannot write " .. BOT_SHARED .. " (run `rex-grokbot setup` first)", 0)
+    end
+  end
+  error("share list is locked by another writer; try again (lock: " .. BOT_LOCK .. ")", 0)
+end
+
+-- Runs fn() holding the lock; the lock is removed afterwards, also when fn fails.
+local function bot_locked(fn)
+  bot_lock()
+  local ok, res = pcall(fn)
+  os.remove(BOT_LOCK)
+  if not ok then error(res, 0) end
+  return res
 end
 
 -- The palette discards an action's return value, so show the result in an alert that closes itself.
@@ -71,18 +137,22 @@ local function bot_name(names, id)
 end
 
 -- Adds id to the list, or removes it if it is there. Returns true when it is now shared.
+-- The whole read/modify/write happens under the lock.
 local function bot_toggle(id)
-  local kept, found = {}, false
-  for _, line in ipairs(bot_read_lines()) do
-    if BOT_SL.line_id(line) == id then found = true else kept[#kept + 1] = line end
-  end
-  if not found then kept[#kept + 1] = id end
-  local ok, err = pcall(bot_write_lines, kept)
+  local ok, res = pcall(bot_locked, function()
+    local kept, found = {}, false
+    for _, line in ipairs(bot_read_lines()) do
+      if BOT_SL.line_id(line) == id then found = true else kept[#kept + 1] = line end
+    end
+    if not found then kept[#kept + 1] = id end
+    bot_write_lines(kept)
+    return not found
+  end)
   if not ok then
-    bot_alert("Rex Bot", "Could not update the share list: " .. tostring(err))
-    error(err, 0)
+    bot_alert("Rex Bot", "Could not update the share list: " .. tostring(res))
+    error(res, 0)
   end
-  return not found
+  return res
 end
 
 rex.action{

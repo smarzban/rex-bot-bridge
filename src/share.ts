@@ -1,4 +1,4 @@
-import { chmod, readFile, rename, writeFile, mkdir, unlink } from "node:fs/promises";
+import { chmod, readFile, rename, writeFile, mkdir, unlink, rmdir, stat } from "node:fs/promises";
 import { dirname, join, basename, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 
@@ -67,8 +67,88 @@ function withLock<T>(file: string, fn: () => Promise<T>): Promise<T> {
   return run;
 }
 
+export interface LockOptions {
+  /** Give up after this long waiting for another writer (default 3000ms). */
+  timeoutMs?: number;
+  /** A lock directory older than this is a crashed writer's; break it (default 10000ms). */
+  staleMs?: number;
+  /** Wait between attempts (default 40ms). */
+  retryMs?: number;
+}
+
+/** The lock lua/rex-grokbot-actions.lua takes too: `<list file>.lock`, a directory (mkdir is atomic). */
+export function lockPath(file: string): string {
+  return `${resolve(file)}.lock`;
+}
+
+const isStale = async (path: string, staleMs: number) => {
+  const st = await stat(path).catch(() => null);
+  return !!st && Date.now() - st.mtimeMs > staleMs;
+};
+
+/**
+ * Removes `lock` only if it is still stale once we hold `<lock>.break` (taken with mkdir, like the lock).
+ * Two writers that both saw the same stale lock can't both remove it: the second one re-checks under the
+ * break-lock and finds the first one's fresh lock. A break-lock older than `staleMs` (a breaker that
+ * crashed in the few microseconds it holds it) is removed. Returns true when this call removed the lock.
+ * Same protocol as bot_break in lua/rex-grokbot-actions.lua.
+ */
+export async function breakStaleLock(lock: string, staleMs: number): Promise<boolean> {
+  const brk = `${lock}.break`;
+  try {
+    await mkdir(brk, { mode: 0o700 });
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+    if (await isStale(brk, staleMs)) await rmdir(brk).catch(() => {});
+    return false;
+  }
+  try {
+    if (!(await isStale(lock, staleMs))) return false;
+    await rmdir(lock);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    await rmdir(brk).catch(() => {});
+  }
+}
+
+/**
+ * Cross-process lock around a read/modify/write of the share list. The bridge, the CLI and the Rex palette
+ * (Lua) all write the file; each holds `<file>.lock` (a directory) for the whole update. A lock older than
+ * `staleMs` is removed (a crashed writer must not block forever), under a break-lock so a fresh lock is never removed. After `timeoutMs` this throws and the
+ * file is untouched. The lock is removed when `fn` settles, also when it throws.
+ */
+export async function withShareLock<T>(file: string, fn: () => Promise<T>, opts: LockOptions = {}): Promise<T> {
+  const { timeoutMs = 3000, staleMs = 10_000, retryMs = 40 } = opts;
+  const lock = lockPath(file);
+  await mkdir(dirname(lock), { recursive: true, mode: 0o700 });
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      await mkdir(lock, { mode: 0o700 });
+      break;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+    }
+    const st = await stat(lock).catch(() => null);
+    if (!st) continue; // released between our mkdir and stat
+    if (Date.now() - st.mtimeMs > staleMs && (await breakStaleLock(lock, staleMs))) continue;
+    if (Date.now() >= deadline) throw new Error(`share list is locked by another writer; try again (lock: ${lock})`);
+    await new Promise((r) => setTimeout(r, retryMs));
+  }
+  try {
+    return await fn();
+  } finally {
+    await rmdir(lock).catch(() => {});
+  }
+}
+
 export class ShareFile {
-  constructor(readonly path: string) {}
+  constructor(
+    readonly path: string,
+    private readonly lockOpts: LockOptions = {},
+  ) {}
 
   async read(): Promise<string> {
     try {
@@ -107,13 +187,20 @@ export class ShareFile {
   }
 
   private update(fn: (content: string) => string): Promise<boolean> {
-    return withLock(this.path, async () => {
-      const before = await this.read();
-      const after = fn(before);
-      if (after === before) return false;
-      await atomicWrite(this.path, after);
-      return true;
-    });
+    // The in-process chain first (no self-contention), then the cross-process lock for the whole update.
+    return withLock(this.path, () =>
+      withShareLock(
+        this.path,
+        async () => {
+          const before = await this.read();
+          const after = fn(before);
+          if (after === before) return false;
+          await atomicWrite(this.path, after);
+          return true;
+        },
+        this.lockOpts,
+      ),
+    );
   }
 }
 

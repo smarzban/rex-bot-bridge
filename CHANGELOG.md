@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.7.1 — 2026-11-06
+
+- **Share list: a cross-process lock.** The bridge, the CLI (`rex-grokbot share add|remove`) and the Rex palette
+  (Bot: Share / Unshare …) all edit `~/.config/rex-grokbot-bridge/shared`; two of them at the same moment could
+  lose one edit. Every write now holds `shared.lock` (a directory, made atomically by `mkdir`) for its whole
+  read/modify/write. A writer waits up to ~3s, then fails with "share list is locked by another writer; try again"
+  and the lock path, leaving the file alone. A lock older than 10s (a crashed writer) is removed, but only after
+  re-checking it under a short break-lock (`shared.lock.break`), so two writers that both saw it stale can't
+  remove each other's fresh lock. Readers (the
+  watcher, bridge gating, `say`) don't lock; the rename keeps reads atomic.
+- **Palette writes use a unique temp file** instead of a fixed `shared.tmp`, still 0600 before anything is
+  written.
+- **`rex-grokbot setup` always reloads the Rex config** when the palette block is in place, also when the block
+  is unchanged. Seen live upgrading 0.6.0 → 0.7.0: the block didn't change (it loads the package's Lua, whose
+  content did), so there was no reload and the new palette actions didn't load. Setup then notes: if the palette
+  doesn't show the Bot: actions, quit and reopen the Rex app (sessions keep running). A sandbox HOME still never
+  reloads the real Rex. The README says the same in Quickstart.
+
 ## 0.7.0 — 2026-11-06
 
 What the bot may see and drive is now **shared** with it, a whole session or a single pane, and

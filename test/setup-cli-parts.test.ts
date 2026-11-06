@@ -66,6 +66,11 @@ test("T429 FR1-D cli: setup rex adds only the init.lua block", async () => {
   assert.deepEqual([st.skill, st.config], [false, false]);
   assert.ok(st.calls.every((c) => c.startsWith("rex ")), "no tailscale calls");
   assert.ok(!st.calls.some((c) => c === "rex config reload"), "sandbox HOME: never reloads the real Rex");
+  // T449: a second run (block unchanged) still never reloads the real Rex from a sandbox HOME.
+  const again = sb.run("rex");
+  assert.equal(again.status, 0, again.stderr + again.stdout);
+  assert.match(again.stdout, /already in/);
+  assert.ok(!(await sb.state()).calls.some((c) => c === "rex config reload"), "sandbox HOME, unchanged: no reload");
 });
 
 test("T429 FR1-D cli: setup serve runs only tailscale serve", async () => {
