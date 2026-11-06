@@ -18,9 +18,10 @@ import { PARTS, setup, type Part } from "../setup.js";
 import { setupWebhook } from "../webhook.js";
 import { commandHelp, TOP_HELP } from "./help.js";
 import { readToken } from "../token.js";
-import { SESSION_ID } from "../tools.js";
+import { BLOCK_ID, SESSION_ID } from "../tools.js";
 import { uninstall } from "../uninstall.js";
-import { WatchFile } from "../watch.js";
+import { entryKind, WatchFile } from "../watch.js";
+import { Rex, spawnRunner } from "../rex.js";
 
 const BOOL_FLAGS = [
   "yes",
@@ -108,26 +109,59 @@ async function runWatcher(): Promise<number> {
   });
 }
 
+/** Labels for `watch list`, best effort: id -> "label" (or "(closed)"); empty when Rex can't be asked. */
+async function watchLabels(rexBin: string | null, ids: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (!rexBin || ids.length === 0) return out;
+  try {
+    // Only an already-running server: listing the watch list must never start one.
+    const run = spawnRunner(rexBin, 5_000);
+    const rex = new Rex((args, opts) => run(["--autostart=false", ...args], opts));
+    const sessions = await rex.sessions();
+    const blocks = new Map<string, string>();
+    for (const s of sessions) {
+      out.set(s.session_id, s.label ?? "");
+      if (!ids.some((id) => id.startsWith("block:"))) continue;
+      for (const b of await rex.blocks(s.session_id).catch(() => [])) {
+        blocks.set(b.block_id, `${b.label ?? ""}${s.label ? ` (in ${s.label})` : ""}`.trim());
+      }
+    }
+    for (const [id, label] of blocks) out.set(id, label);
+    for (const id of ids) if (!out.has(id)) out.set(id, "(closed)");
+  } catch {
+    out.clear();
+  }
+  return out;
+}
+
 async function watchCmd(pos: string[]): Promise<number> {
   const [sub, id] = pos;
   if (!sub) return runWatcher();
   const ctx = makeCtx();
   const watch = new WatchFile(ctx.paths.watchedFile);
   if (sub === "list") {
-    for (const s of await watch.list()) console.log(s);
+    const ids = await watch.list();
+    const labels = await watchLabels(ctx.rexBin, ids);
+    for (const s of ids) {
+      const label = labels.get(s);
+      console.log(`${(entryKind(s) ?? "?").padEnd(7)} ${s}${label ? `  ${label}` : ""}`);
+    }
     return 0;
   }
   if (sub === "add" || sub === "remove") {
-    if (!id || !SESSION_ID.safeParse(id).success) {
-      console.error(`usage: rex-grokbot watch ${sub} session:<id>   (full id: see \`rex ls --json\` or \`rex-grokbot whoami\`)`);
+    if (!id || !(SESSION_ID.safeParse(id).success || BLOCK_ID.safeParse(id).success)) {
+      console.error(
+        `usage: rex-grokbot watch ${sub} session:<id>|block:<id>   (a session covers every pane in it; a block only that pane; ids: \`rex-grokbot whoami\` or \`rex ls --json\`)`,
+      );
       return 2;
     }
     await ensurePrivateDir(ctx.paths.stateDir);
     const changed = sub === "add" ? await watch.add(id) : await watch.remove(id);
-    console.log(`${changed ? (sub === "add" ? "watching" : "no longer watching") : sub === "add" ? "already watching" : "was not watching"} ${id}`);
+    const what = `${entryKind(id) === "pane" ? "pane" : "session"} ${id}`;
+    console.log(`${changed ? (sub === "add" ? "watching" : "no longer watching") : sub === "add" ? "already watching" : "was not watching"} ${what}`);
     return 0;
   }
-  console.error("usage: rex-grokbot watch [add|remove <session> | list]");
+  console.error("usage: rex-grokbot watch [add|remove <session:…|block:…> | list]");
   return 2;
 }
 
@@ -179,6 +213,21 @@ async function sayCmd(text: string): Promise<number> {
     return 2;
   }
   const ctx = makeCtx();
+  // Only a watched pane (or a pane in a watched session) may message the bot.
+  const block = process.env.REX_BLOCK || null;
+  const session = process.env.REX_SESSION || null;
+  if (!block) {
+    console.error("rex-grokbot: not sent: not running inside a Rex pane");
+    return 0;
+  }
+  const watched = await new WatchFile(ctx.paths.watchedFile).covers(session, block).catch(() => false);
+  if (!watched) {
+    console.error(
+      "rex-grokbot: not sent: this pane isn't watched; the person can watch it from the Rex palette " +
+        "(Bot: Watch / Unwatch This Pane, or This Session)",
+    );
+    return 0;
+  }
   const s = await readSettings(ctx.paths.configFile).catch(() => null);
   if (!s?.webhook.url) {
     console.error("rex-grokbot: no webhook configured (rex-grokbot setup webhook); message not sent");
@@ -187,8 +236,8 @@ async function sayCmd(text: string): Promise<number> {
   const payload = {
     event: "agent_message",
     text,
-    rex_session: process.env.REX_SESSION ?? null,
-    rex_block: process.env.REX_BLOCK ?? null,
+    rex_session: session,
+    rex_block: block,
     cwd: process.cwd(),
     host: hostname(),
     timestamp: new Date().toISOString(),

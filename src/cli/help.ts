@@ -183,19 +183,26 @@ export const HELP: Record<string, CommandHelp> = {
     exit: "0 printed · 1 no token yet (run rex-grokbot setup) · 2 usage",
   },
   watch: {
-    usage: ["rex-grokbot watch add <session>", "rex-grokbot watch remove <session>", "rex-grokbot watch list", "rex-grokbot watch"],
-    summary: "opt a Rex session in or out of the bot (watched mode); bare: run the watcher",
+    usage: ["rex-grokbot watch add <session|pane>", "rex-grokbot watch remove <session|pane>", "rex-grokbot watch list", "rex-grokbot watch"],
+    summary: "opt a Rex session or a single pane in or out of the bot; bare: run the watcher",
     description:
-      "In watched mode the bot can read and drive only sessions on this list. You can also toggle a\n" +
-      "session from Rex's palette: Bot: Watch / Unwatch This Session. Bare `rex-grokbot watch` runs the\n" +
-      "status watcher (the com.rexgrokbotbridge.watch service runs it for you).",
+      "The bot is notified about, and in watched mode can read and drive, only what is on this list. A\n" +
+      "session covers every pane in it; a pane covers only that pane (session-level actions such as\n" +
+      "closing the session or spawning into it need the session watched). `rex-grokbot say` sends only\n" +
+      "from a pane on the list. You can also toggle from Rex's palette: Bot: Watch / Unwatch This Session\n" +
+      "or Bot: Watch / Unwatch This Pane. Bare `rex-grokbot watch` runs the status watcher (the\n" +
+      "com.rexgrokbotbridge.watch service runs it for you).",
     sections: [
       [
         "Arguments",
-        [["<session>", "a full session id, session:<uuid> (see rex ls --json or rex-grokbot whoami)"]],
+        [
+          ["<session>", "a full session id, session:<uuid> (rex-grokbot whoami prints REX_SESSION; rex ls --json lists all)"],
+          ["<pane>", "a full pane id, block:<uuid> (rex-grokbot whoami prints REX_BLOCK)"],
+        ],
       ],
+      ["Output", [["list", "one line per entry: kind (session|pane), id, label when Rex can tell it"]]],
     ],
-    examples: ["rex-grokbot watch add \"$REX_SESSION\"", "rex-grokbot watch list"],
+    examples: ["rex-grokbot watch add \"$REX_SESSION\"", "rex-grokbot watch add \"$REX_BLOCK\"", "rex-grokbot watch list"],
     exit: "0 done (also when already on / off the list) · 2 usage",
   },
   say: {
@@ -203,8 +210,10 @@ export const HELP: Record<string, CommandHelp> = {
     summary: "from an agent: send a message to the coordinator bot",
     description:
       "POST an agent_message event (text, REX_SESSION, REX_BLOCK, cwd) to the webhook. Everything after\n" +
-      "`say` is the message. Never fails the caller: exits 0 even when it isn't delivered.",
-    sections: [["Output", [["stderr", "rex-grokbot: sent, or why it wasn't"]]]],
+      "`say` is the message. Sent only when this pane (REX_BLOCK) or its session (REX_SESSION) is on the\n" +
+      "watch list; outside Rex or from an unwatched pane it is not sent. Never fails the caller: exits 0\n" +
+      "even when it isn't sent or delivered.",
+    sections: [["Output", [["stderr", "rex-grokbot: sent, or why it wasn't (not in Rex, pane not watched, no webhook)"]]]],
     examples: ['rex-grokbot say "Tests pass; PR is up for review"'],
     exit: "0 sent or not (see stderr) · 2 no message",
   },
@@ -254,7 +263,7 @@ const GROUPS: [string, [string, string][]][] = [
   ],
   ["Check", [["doctor", HELP.doctor!.summary]]],
   ["Settings", [["config", HELP.config!.summary]]],
-  ["Watch list", [["watch", "add|remove <session>, list: which sessions the bot may drive"]]],
+  ["Watch list", [["watch", "add|remove <session|pane>, list: which sessions and panes the bot may drive"]]],
   [
     "For agents",
     [
@@ -307,7 +316,9 @@ export function readmeCommands(): string {
   for (const [name, h] of Object.entries(HELP)) {
     const joined = h.usage.reduce<string[]>((acc, u) => (u.startsWith(" ") ? [...acc.slice(0, -1), `${acc.at(-1)} ${u.trim()}`] : [...acc, u]), []);
     const usage = joined.map((u) => `\`${u.replace(/\s+/g, " ").replace(/\|/g, "\\|")}\``).join("<br>");
-    lines.push(`| ${usage} | ${h.summary.replace(/\|/g, "\\|")} (\`rex-grokbot help ${name}\`) |`);
+    // Escaped so placeholders like <mac> render on GitHub instead of vanishing as HTML tags.
+    const summary = h.summary.replace(/\|/g, "\\|").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    lines.push(`| ${usage} | ${summary} (\`rex-grokbot help ${name}\`) |`);
   }
   return lines.join("\n");
 }

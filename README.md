@@ -107,9 +107,9 @@ Run `rex-grokbot --help`, or `rex-grokbot help <command>` / `rex-grokbot <comman
 | `rex-grokbot doctor [--json] [--test-webhook]` | check the whole chain; every problem comes with a fix line (`rex-grokbot help doctor`) |
 | `rex-grokbot uninstall [--yes] [--purge] [--serve-off]` | remove the services, palette actions and skill (`rex-grokbot help uninstall`) |
 | `rex-grokbot config get <key> [--show]`<br>`rex-grokbot config set <key> <value>` | read or change one setting in config.json (`rex-grokbot help config`) |
-| `rex-grokbot url` | print the Grok Bot connector URL (https://<mac>.<tailnet>.ts.net:8443/mcp) (`rex-grokbot help url`) |
+| `rex-grokbot url` | print the Grok Bot connector URL (https://&lt;mac&gt;.&lt;tailnet&gt;.ts.net:8443/mcp) (`rex-grokbot help url`) |
 | `rex-grokbot token [--rotate]` | print the bearer token for the connector's Authorization header (--rotate: new one) (`rex-grokbot help token`) |
-| `rex-grokbot watch add <session>`<br>`rex-grokbot watch remove <session>`<br>`rex-grokbot watch list`<br>`rex-grokbot watch` | opt a Rex session in or out of the bot (watched mode); bare: run the watcher (`rex-grokbot help watch`) |
+| `rex-grokbot watch add <session\|pane>`<br>`rex-grokbot watch remove <session\|pane>`<br>`rex-grokbot watch list`<br>`rex-grokbot watch` | opt a Rex session or a single pane in or out of the bot; bare: run the watcher (`rex-grokbot help watch`) |
 | `rex-grokbot say "message"` | from an agent: send a message to the coordinator bot (`rex-grokbot help say`) |
 | `rex-grokbot whoami` | print this pane's REX_SESSION and REX_BLOCK (`rex-grokbot help whoami`) |
 | `rex-grokbot serve` | run the MCP bridge (127.0.0.1:7400 by default) (`rex-grokbot help serve`) |
