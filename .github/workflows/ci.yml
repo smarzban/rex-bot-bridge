@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    # macOS only, like the package itself. Tests that need a real Rex (the Lua ones) skip when rex isn't on PATH.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # --ignore-scripts: `prepare` runs the build, which has its own step below.
+      - run: npm ci --ignore-scripts
+      - run: npm run typecheck
+      # Build before testing: the CLI tests run dist/cli/rex-grokbot.js.
+      - run: npm run build
+      - run: npm test

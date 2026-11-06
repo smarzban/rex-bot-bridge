@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { AuditLog } from "./audit.js";
 import { AGENTS, Ops, SETTLED_STATES } from "./ops.js";
+import { packageVersion } from "./version.js";
 
 export const SESSION_ID = z
   .string()
@@ -38,7 +39,7 @@ type Result = { content: { type: "text"; text: string }[]; isError?: boolean };
 
 /** Registers every bridge tool on a fresh McpServer. Each call is audited. */
 export function buildMcpServer(ops: Ops, audit: AuditLog): McpServer {
-  const server = new McpServer({ name: "rex-grokbot-bridge", version: "0.7.1" });
+  const server = new McpServer({ name: "rex-grokbot-bridge", version: packageVersion() });
 
   const wrap =
     <A extends Record<string, unknown>>(tool: string, fn: (args: A) => Promise<unknown>) =>

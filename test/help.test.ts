@@ -1,4 +1,4 @@
-// T429: tsk-style help. Every command has a page; all the ways to ask for it work; README stays in sync.
+// T429: tsk-style help. Every command has a page; all the ways to ask for it work; docs/reference.md stays in sync.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -64,9 +64,9 @@ test("T429 help: unknown command / flag → one short error with a --help hint, 
   assert.equal(cli([]).status, 2, "bare rex-grokbot: help on stderr, exit 2");
 });
 
-test("T429 help: README's command table is generated from the help text", async () => {
-  const readme = await readFile(join(ROOT, "README.md"), "utf8");
-  const m = /<!-- commands:start[^>]*-->\n([\s\S]*?)\n<!-- commands:end -->/.exec(readme);
-  assert.ok(m, "README has the commands markers");
-  assert.equal(m[1], readmeCommands(), "README is stale: run npm run docs:commands");
+test("T429 help: docs/reference.md's command table is generated from the help text", async () => {
+  const reference = await readFile(join(ROOT, "docs/reference.md"), "utf8");
+  const m = /<!-- commands:start[^>]*-->\n([\s\S]*?)\n<!-- commands:end -->/.exec(reference);
+  assert.ok(m, "docs/reference.md has the commands markers");
+  assert.equal(m[1], readmeCommands(), "docs/reference.md is stale: run npm run docs:commands");
 });
