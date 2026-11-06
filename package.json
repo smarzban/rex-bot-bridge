@@ -50,7 +50,7 @@
     "e2e": "node scripts/e2e.mjs",
     "e2e:paste": "node scripts/e2e-paste.mjs",
     "e2e:sandbox": "node scripts/e2e-sandbox.mjs",
-    "docs:commands": "tsx scripts/gen-readme-commands.ts"
+    "docs:commands": "tsx scripts/gen-reference-commands.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",

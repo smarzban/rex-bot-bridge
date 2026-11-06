@@ -319,7 +319,7 @@ export function commandHelp(name: string): string | undefined {
   ].join("\n\n");
 }
 
-/** The README's command table, generated from the same help text (test/help.test.ts keeps them in sync). */
+/** The command table in docs/reference.md, generated from the same help text (test/help.test.ts keeps them in sync). */
 export function readmeCommands(): string {
   const lines = ["| Command | Does |", "|---|---|"];
   for (const [name, h] of Object.entries(HELP)) {
