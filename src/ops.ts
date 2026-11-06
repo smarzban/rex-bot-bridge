@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 import { Rex, type ProcessInfo, type StatusRecord } from "./rex.js";
 import type { Mode } from "./settings.js";
-import { WatchFile } from "./watch.js";
+import { covers, WatchFile } from "./watch.js";
 
 export class BridgeError extends Error {
   constructor(message: string) {
@@ -27,11 +27,14 @@ export interface PaneInfo {
   window_label?: string;
   process: ProcessInfo | null;
   status: StatusRecord | null;
+  /** The bot may read/drive this pane in watched mode: the pane or its session is on the watch list. */
+  watched: boolean;
 }
 
 export interface SessionInfo {
   session_id: string;
   session_label?: string;
+  /** The session itself is on the watch list (every pane in it is covered). */
   watched: boolean;
   panes: PaneInfo[];
 }
@@ -51,8 +54,24 @@ export interface OpsDeps {
   mode: () => Promise<Mode>;
 }
 
-export const OPT_IN_HINT =
-  'Ask the human to opt it in (Rex command palette "Bot: Watch / Unwatch This Session", or `rex-grokbot watch add <session_id>`)';
+/** How the human opts a pane (or its whole session) in. Only the human adds entries in watched mode. */
+export function paneOptInHint(blockId: string, sessionId: string): string {
+  return (
+    'Ask the human to opt it in: Rex command palette "Bot: Watch / Unwatch This Pane" (only that pane) or ' +
+    '"Bot: Watch / Unwatch This Session" (every pane in it), or `rex-grokbot watch add ' +
+    `${blockId}\` / \`rex-grokbot watch add ${sessionId}\``
+  );
+}
+
+/** Session-level actions need the session itself watched; a watched pane is not enough. */
+export function sessionOptInHint(sessionId: string): string {
+  return (
+    'Ask the human to watch the whole session: Rex command palette "Bot: Watch / Unwatch This Session" in it, ' +
+    `or \`rex-grokbot watch add ${sessionId}\`. A watched pane alone does not allow session-level actions`
+  );
+}
+
+const FULL_MODE_NOTE = "The Mac's owner can allow every session with `rex-grokbot config set mode full`.";
 
 /** Runs fn over items with at most `limit` in flight. */
 async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> {
@@ -101,13 +120,26 @@ export class Ops {
     throw new BridgeError(`block ${blockId} not found in any session`);
   }
 
-  /** In watched mode, refuses unless the session is on the watch list. */
+  /**
+   * Session-scoped tools (close_session, spawn_agent into an existing session). In watched mode, refuses
+   * unless the session itself is on the watch list: a watched pane in it does not count.
+   */
   private async gateSession(tool: string, sessionId: string): Promise<void> {
     if ((await this.mode()) === "full") return;
-    if ((await this.watch.list()).includes(sessionId)) return;
+    if ((await this.watch.sessions()).includes(sessionId)) return;
     throw new BridgeError(
-      `${tool} refused: the bridge is in "watched" mode and session ${sessionId} is not watched. ${OPT_IN_HINT}. ` +
-        "The Mac's owner can allow every session with `rex-grokbot config set mode full`.",
+      `${tool} refused: the bridge is in "watched" mode and session ${sessionId} is not watched. ` +
+        `${sessionOptInHint(sessionId)}. ${FULL_MODE_NOTE}`,
+    );
+  }
+
+  /** Block-scoped tools. In watched mode, refuses unless the pane or its session is on the watch list. */
+  private async gateBlock(tool: string, sessionId: string, blockId: string): Promise<void> {
+    if ((await this.mode()) === "full") return;
+    if (await this.watch.covers(sessionId, blockId)) return;
+    throw new BridgeError(
+      `${tool} refused: the bridge is in "watched" mode and pane ${blockId} (session ${sessionId}) is not watched, ` +
+        `nor is its session. ${paneOptInHint(blockId, sessionId)}. ${FULL_MODE_NOTE}`,
     );
   }
 
@@ -124,7 +156,7 @@ export class Ops {
         throw new BridgeError(`block ${blockId} is not in session ${sessionId}`);
       }
     }
-    await this.gateSession(tool, session);
+    await this.gateBlock(tool, session, blockId);
     return session;
   }
 
@@ -151,6 +183,7 @@ export class Ops {
           window_label: b.window_id ? windows.get(b.window_id) : undefined,
           process,
           status,
+          watched: covers(watched, s.session_id, b.block_id),
         };
       });
       return { session_id: s.session_id, session_label: s.label, watched: watched.includes(s.session_id), panes };
@@ -239,13 +272,13 @@ export class Ops {
         await this.watch.add(res.session_id);
         watched = true;
       } else {
-        watched = (await this.watch.list()).includes(res.session_id);
+        watched = (await this.watch.sessions()).includes(res.session_id);
       }
     } else if (opts.watch) {
       await this.watch.add(res.session_id);
       watched = true;
     } else {
-      watched = (await this.watch.list()).includes(res.session_id);
+      watched = (await this.watch.sessions()).includes(res.session_id);
     }
     return { ...res, agent: opts.agent, argv, cwd, watched };
   }
@@ -256,7 +289,7 @@ export class Ops {
     let last: StatusRecord | null = null;
     for (;;) {
       // Access can be revoked mid-wait (unwatched, or mode switched to watched): recheck before each poll.
-      await this.gateSession("wait_for_status", session);
+      await this.gateBlock("wait_for_status", session, blockId);
       last = await this.rex.status(session, blockId);
       if (last && states.includes(last.state)) {
         return { session_id: session, block_id: blockId, timed_out: false, status: last };
@@ -271,22 +304,32 @@ export class Ops {
   async closePane(blockId: string, sessionId?: string) {
     const session = await this.target("close_pane", blockId, sessionId);
     await this.rex.closeBlock(session, blockId);
-    return { session_id: session, block_id: blockId, closed: true };
+    const unwatched = await this.watch.remove(blockId);
+    return { session_id: session, block_id: blockId, closed: true, removed_from_watch_list: unwatched };
   }
 
   async closeSession(sessionId: string) {
     await this.gateSession("close_session", sessionId);
+    const blocks = await this.rex.blocks(sessionId).catch(() => []);
     await this.rex.killSession(sessionId);
-    const unwatched = await this.watch.remove(sessionId);
+    let unwatched = await this.watch.remove(sessionId);
+    // Pane entries of a closed session would only go stale.
+    for (const b of blocks) if (await this.watch.remove(b.block_id)) unwatched = true;
     return { session_id: sessionId, closed: true, removed_from_watch_list: unwatched };
   }
 
-  async watchSession(sessionId: string) {
+  private async refuseBotWatch(tool: string, what: string): Promise<void> {
     if ((await this.mode()) === "watched") {
       throw new BridgeError(
-        `watch_session refused: the bridge is in "watched" mode, where only the human adds sessions. ${OPT_IN_HINT}.`,
+        `${tool} refused: the bridge is in "watched" mode, where only the human adds ${what}. Ask the human to opt ` +
+          'it in (Rex command palette "Bot: Watch / Unwatch This Pane" or "Bot: Watch / Unwatch This Session", or ' +
+          "`rex-grokbot watch add <block_id|session_id>`).",
       );
     }
+  }
+
+  async watchSession(sessionId: string) {
+    await this.refuseBotWatch("watch_session", "sessions");
     const changed = await this.watch.add(sessionId);
     return { session_id: sessionId, watched: true, changed };
   }
@@ -296,8 +339,24 @@ export class Ops {
     return { session_id: sessionId, watched: false, changed };
   }
 
+  async watchPane(blockId: string) {
+    await this.refuseBotWatch("watch_pane", "panes");
+    const changed = await this.watch.add(blockId);
+    return { block_id: blockId, watched: true, changed };
+  }
+
+  async unwatchPane(blockId: string) {
+    const changed = await this.watch.remove(blockId);
+    return { block_id: blockId, watched: false, changed };
+  }
+
   async listWatched() {
-    return { sessions_file: this.watch.path, watched: await this.watch.list() };
+    const all = await this.watch.list();
+    return {
+      watched_file: this.watch.path,
+      sessions: all.filter((id) => id.startsWith("session:")),
+      panes: all.filter((id) => id.startsWith("block:")),
+    };
   }
 
   async heartbeatAgeS(): Promise<number | null> {
@@ -339,6 +398,8 @@ export class Ops {
       rex: version,
       watcher_heartbeat_age_s: heartbeat,
       watched_count: watched.length,
+      watched_sessions: watched.filter((id) => id.startsWith("session:")).length,
+      watched_panes: watched.filter((id) => id.startsWith("block:")).length,
       audit_log: this.deps.auditLogPath,
     };
   }

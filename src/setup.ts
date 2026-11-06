@@ -46,9 +46,10 @@ const SECTION_TITLES: Record<Part, string> = {
 };
 
 const MODE_HELP = `Powers for the bot:
-  watched  (recommended) the bot can only read, type into, and close panes in sessions you opted in
-           (palette "Bot: Watch / Unwatch This Session" or \`rex-grokbot watch add <session>\`), plus new
-           sessions it spawns. It can list every session.
+  watched  (recommended) the bot can only read, type into, and close panes you opted in, one by one
+           or a whole session at a time (palette "Bot: Watch / Unwatch This Pane" / "... This Session",
+           or \`rex-grokbot watch add <block|session>\`), plus new sessions it spawns. It can list every
+           session.
   full     the bot can drive every Rex session on this Mac.`;
 
 /** One printer per run: numbered section headers, and ✅/⚠️/❌ lines with an optional fix line. */

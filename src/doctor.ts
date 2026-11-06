@@ -87,7 +87,7 @@ export async function runDoctor(ctx: Ctx, opts: { testWebhook: boolean }): Promi
   if (loose.length) {
     add("file_modes", "warn", `not mode 600: ${loose.join(", ")}`, `chmod 600 ${loose.map((l) => `'${l.replace(/ \(\d+\)$/, "")}'`).join(" ")}`);
   } else add("file_modes", "ok", "state files are mode 600");
-  add("mode", "ok", `mode ${s.mode}${s.mode === "full" ? " (the bot can drive every session)" : " (only watched sessions)"}`);
+  add("mode", "ok", `mode ${s.mode}${s.mode === "full" ? " (the bot can drive every session)" : " (only watched sessions and panes)"}`);
 
   // init.lua
   const blk = await inspectBlock(paths.rexInitLua);

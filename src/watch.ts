@@ -3,21 +3,37 @@ import { dirname, join, basename, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 
 /**
- * The bot-watch opt-in list: one session ID per line, `#` comments allowed.
- * Parsing matches bot-watch.lua: the ID is the first token before whitespace or `#`.
+ * The bot-watch opt-in list: one entry per line, `#` comments allowed. An entry is a session
+ * (`session:<uuid>`: every pane in it) or a single pane (`block:<uuid>`: only that pane).
+ * Parsing matches lua/watchlist.lua: the entry is the first token before whitespace or `#`, and a
+ * token that isn't `session:…` or `block:…` is ignored.
  */
 export function lineId(line: string): string | null {
   const m = /^\s*([^\s#]+)/.exec(line);
   return m?.[1] ?? null;
 }
 
+export type WatchKind = "session" | "pane";
+
+/** The kind of a watch entry, or null for anything else (junk lines are ignored everywhere). */
+export function entryKind(id: string): WatchKind | null {
+  if (/^session:\S+$/.test(id)) return "session";
+  if (/^block:\S+$/.test(id)) return "pane";
+  return null;
+}
+
 export function parseWatched(content: string): string[] {
   const ids: string[] = [];
   for (const line of content.split("\n")) {
     const id = lineId(line);
-    if (id && !ids.includes(id)) ids.push(id);
+    if (id && entryKind(id) && !ids.includes(id)) ids.push(id);
   }
   return ids;
+}
+
+/** True when the pane is watched itself or its session is. Either id may be missing. */
+export function covers(ids: readonly string[], sessionId?: string | null, blockId?: string | null): boolean {
+  return (!!sessionId && ids.includes(sessionId)) || (!!blockId && ids.includes(blockId));
 }
 
 export function addWatched(content: string, id: string): string {
@@ -63,8 +79,22 @@ export class WatchFile {
     }
   }
 
+  /** Every entry, sessions and panes, in file order. */
   async list(): Promise<string[]> {
     return parseWatched(await this.read());
+  }
+
+  async sessions(): Promise<string[]> {
+    return (await this.list()).filter((id) => entryKind(id) === "session");
+  }
+
+  async panes(): Promise<string[]> {
+    return (await this.list()).filter((id) => entryKind(id) === "pane");
+  }
+
+  /** True when the pane or its session is on the list. */
+  async covers(sessionId?: string | null, blockId?: string | null): Promise<boolean> {
+    return covers(await this.list(), sessionId, blockId);
   }
 
   /** Returns true if the file changed. */

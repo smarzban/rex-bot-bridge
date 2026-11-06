@@ -28,6 +28,8 @@ export const TOOL_NAMES = [
   "close_session",
   "watch_session",
   "unwatch_session",
+  "watch_pane",
+  "unwatch_pane",
   "list_watched",
   "bridge_status",
 ] as const;
@@ -36,7 +38,7 @@ type Result = { content: { type: "text"; text: string }[]; isError?: boolean };
 
 /** Registers every bridge tool on a fresh McpServer. Each call is audited. */
 export function buildMcpServer(ops: Ops, audit: AuditLog): McpServer {
-  const server = new McpServer({ name: "rex-grokbot-bridge", version: "0.6.0" });
+  const server = new McpServer({ name: "rex-grokbot-bridge", version: "0.7.0" });
 
   const wrap =
     <A extends Record<string, unknown>>(tool: string, fn: (args: A) => Promise<unknown>) =>
@@ -61,7 +63,8 @@ export function buildMcpServer(ops: Ops, audit: AuditLog): McpServer {
       description:
         "List every Rex session and its panes: session/block/window ids and labels, foreground process (name, cwd), " +
         "program status reported by the agent (state working|blocked|done|error|idle, kind permission|question|auth, app, msg) " +
-        "and whether the session is on the bot-watch list. Panes whose program does not report status have status=null; " +
+        "and whether the session (session.watched) or the pane (pane.watched: the pane or its session is on the list) is on " +
+        "the bot-watch list. Panes whose program does not report status have status=null; " +
         "use process.name as a fallback.",
       inputSchema: { session: z.string().optional().describe("Only this session (id or label)") },
       annotations: ro,
@@ -129,8 +132,8 @@ export function buildMcpServer(ops: Ops, audit: AuditLog): McpServer {
         "shell (login shell, no prompt) or custom (command = argv array). Give session_id to open a new tab in an " +
         "existing session, or new_session_label to create a new session. With watch=true (default) the session is " +
         "added to the bot-watch list so status changes are pushed to the coordinator. Returns session_id and block_id. " +
-        "In watched mode (see bridge_status) session_id must be a watched session, a new session is always watched, " +
-        "and watch is ignored (the bot never adds an existing session to the list).",
+        "In watched mode (see bridge_status) session_id must be a watched session (a watched pane in it is not enough), " +
+        "a new session is always watched, and watch is ignored (the bot never adds an existing session to the list).",
       inputSchema: {
         agent: z.enum(AGENTS),
         cwd: z.string().min(1).describe("Absolute directory (or ~/...)"),
@@ -167,7 +170,7 @@ export function buildMcpServer(ops: Ops, audit: AuditLog): McpServer {
   server.registerTool(
     "close_pane",
     {
-      description: "Close a pane and end the program running in it.",
+      description: "Close a pane and end the program running in it (and drop the pane from the bot-watch list).",
       inputSchema: { block_id: BLOCK_ID, session_id: SESSION_ID.optional() },
       annotations: { destructiveHint: true },
     },
@@ -177,7 +180,9 @@ export function buildMcpServer(ops: Ops, audit: AuditLog): McpServer {
   server.registerTool(
     "close_session",
     {
-      description: "Kill a whole Rex session (every pane in it) and drop it from the bot-watch list.",
+      description:
+        "Kill a whole Rex session (every pane in it) and drop it and its panes from the bot-watch list. In watched " +
+        "mode the session itself must be watched; a watched pane in it is not enough.",
       inputSchema: { session_id: SESSION_ID },
       annotations: { destructiveHint: true },
     },
@@ -188,8 +193,8 @@ export function buildMcpServer(ops: Ops, audit: AuditLog): McpServer {
     "watch_session",
     {
       description:
-        "Add a session to the bot-watch list so its agents' status changes are pushed to the coordinator. " +
-        "Only in full mode: in watched mode only the human can opt a session in.",
+        "Add a session (every pane in it) to the bot-watch list so its agents' status changes are pushed to the " +
+        "coordinator. Only in full mode: in watched mode only the human can opt a session in.",
       inputSchema: { session_id: SESSION_ID },
     },
     wrap("watch_session", (a: { session_id: string }) => ops.watchSession(a.session_id)),
@@ -205,8 +210,33 @@ export function buildMcpServer(ops: Ops, audit: AuditLog): McpServer {
   );
 
   server.registerTool(
+    "watch_pane",
+    {
+      description:
+        "Add one pane to the bot-watch list (only that pane, not the rest of its session). " +
+        "Only in full mode: in watched mode only the human can opt a pane in.",
+      inputSchema: { block_id: BLOCK_ID },
+    },
+    wrap("watch_pane", (a: { block_id: string }) => ops.watchPane(a.block_id)),
+  );
+
+  server.registerTool(
+    "unwatch_pane",
+    {
+      description: "Remove a pane from the bot-watch list (a watched session still covers it).",
+      inputSchema: { block_id: BLOCK_ID },
+    },
+    wrap("unwatch_pane", (a: { block_id: string }) => ops.unwatchPane(a.block_id)),
+  );
+
+  server.registerTool(
     "list_watched",
-    { description: "List the session ids on the bot-watch list.", inputSchema: {}, annotations: ro },
+    {
+      description:
+        "List the bot-watch list: sessions (every pane in each) and panes (only that pane).",
+      inputSchema: {},
+      annotations: ro,
+    },
     wrap("list_watched", () => ops.listWatched()),
   );
 
@@ -214,8 +244,9 @@ export function buildMcpServer(ops: Ops, audit: AuditLog): McpServer {
     "bridge_status",
     {
       description:
-        "Bridge health and powers: mode (watched = pane and session tools only work on watched sessions; full = every " +
-        "session), Rex version, watcher heartbeat age (s), number of watched sessions, audit log path.",
+        "Bridge health and powers: mode (watched = pane tools only work on watched panes or panes in watched sessions, " +
+        "session tools only on watched sessions; full = every session), Rex version, watcher heartbeat age (s), " +
+        "number of watched sessions and panes, audit log path.",
       inputSchema: {},
       annotations: ro,
     },
