@@ -6,9 +6,9 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rmdir, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { lockPath, parseShared, ShareFile, withShareLock } from "../src/share.js";
+import { breakStaleLock, lockPath, parseShared, ShareFile, withShareLock } from "../src/share.js";
 import { tempDir } from "./helpers.js";
-import { survivors, writerProcess } from "./fixtures/writers.js";
+import { breakerProcess, survivors, writerProcess } from "./fixtures/writers.js";
 
 const A = "block:01a1a7e9-0000-7000-8000-0000000000a1";
 const S1 = "session:01a1a7e9-0000-7000-8000-000000000001";
@@ -49,6 +49,55 @@ test("T427 lock: a stale lock (mtime older than 10s) is broken", async () => {
   assert.ok(Date.now() - started < 1000, "didn't wait out the timeout");
   assert.deepEqual(parseShared(await readFile(file, "utf8")), [A]);
   assert.ok(!existsSync(lockPath(file)));
+});
+
+test("T427 lock: several processes breaking the same stale lock at once never both hold it, no lost edits", async () => {
+  // Each round: a stale lock, then P processes released at the same instant, all finding it stale.
+  const ROUNDS = 8;
+  const P = 6;
+  for (let round = 0; round < ROUNDS; round++) {
+    const dir = await tempDir();
+    const file = join(dir, "shared");
+    const go = join(dir, "go");
+    await writeFile(file, `${S1}\n`);
+    await mkdir(lockPath(file));
+    const old = new Date(Date.now() - 60_000);
+    await utimes(lockPath(file), old, old);
+    const ids = Array.from({ length: P }, (_, i) => `block:r${round}-p${i}`);
+    const procs = ids.map((id) => breakerProcess(file, id, go, dir));
+    await new Promise((r) => setTimeout(r, 600)); // let every process start and wait on <go>
+    await writeFile(go, "");
+    await Promise.all(procs);
+    assert.deepEqual(new Set(parseShared(await readFile(file, "utf8"))), new Set([S1, ...ids]), `round ${round}`);
+    assert.ok(!existsSync(lockPath(file)), "lock removed");
+    assert.ok(!existsSync(`${lockPath(file)}.break`), "break-lock removed");
+  }
+});
+
+test("T427 lock: breaking re-checks under the break-lock, so a writer that saw a stale lock can't remove a fresh one", async () => {
+  const dir = await tempDir();
+  const lock = lockPath(join(dir, "shared"));
+  const brk = `${lock}.break`;
+  const age = async (p: string, ms: number) => {
+    const t = new Date(Date.now() - ms);
+    await utimes(p, t, t);
+  };
+  // B saw the lock stale, but A broke it and took a fresh one first: B's break finds it fresh, leaves it.
+  await mkdir(lock);
+  assert.equal(await breakStaleLock(lock, 10_000), false);
+  assert.ok(existsSync(lock), "fresh lock kept");
+  assert.ok(!existsSync(brk), "break-lock released");
+  // Another breaker holds the break-lock: no removal, even of a stale lock; their break-lock is left alone.
+  await age(lock, 20_000);
+  await mkdir(brk);
+  assert.equal(await breakStaleLock(lock, 10_000), false);
+  assert.ok(existsSync(lock) && existsSync(brk));
+  // A break-lock older than staleMs (crashed breaker) is removed; the next attempt breaks the stale lock.
+  await age(brk, 20_000);
+  assert.equal(await breakStaleLock(lock, 10_000), false);
+  assert.ok(!existsSync(brk), "stale break-lock removed");
+  assert.equal(await breakStaleLock(lock, 10_000), true);
+  assert.ok(!existsSync(lock) && !existsSync(brk));
 });
 
 test("T427 lock: a fresh lock held past the timeout is a clear error and the file is unchanged", async () => {

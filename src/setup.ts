@@ -146,8 +146,9 @@ async function rexSection(ctx: Ctx, out: Printer): Promise<void> {
     if (isSandboxHome(ctx, ctx.realHome ?? userInfo().homedir)) {
       out.note("(HOME is not your account's home, so the running Rex server was not reloaded.)");
     } else {
-      const rl = await ctx.rex(["config", "reload"]);
-      if (rl.code === 0) out.ok("Rex config reloaded");
+      // A reload that throws (timeout, spawn failure) is a warning like a non-zero exit; setup carries on.
+      const rl = await ctx.rex(["config", "reload"]).catch(() => null);
+      if (rl?.code === 0) out.ok("Rex config reloaded");
       else out.warn("`rex config reload` failed.", "rex config reload");
       out.note(RELAUNCH_NOTE);
     }

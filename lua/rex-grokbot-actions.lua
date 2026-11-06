@@ -37,8 +37,9 @@ end
 
 -- The cross-process lock the bridge and the CLI take too (src/share.ts withShareLock): the directory
 -- <list>.lock, made with mkdir (atomic). Waits up to ~3s (60 x 50ms); a lock older than 10s is a crashed
--- writer's and is removed. Same thresholds as the Node side.
+-- writer's and is removed, but only under the break-lock (bot_break). Same thresholds as the Node side.
 local BOT_LOCK = BOT_SHARED .. ".lock"
+local BOT_BREAK = BOT_LOCK .. ".break"
 local BOT_LOCK_TRIES, BOT_LOCK_STALE = 60, 10
 
 local function bot_exists(path)
@@ -46,15 +47,42 @@ local function bot_exists(path)
   return ok and r and r.code == 0
 end
 
+-- mtime in seconds, or nil when the path is gone.
+local function bot_mtime(path)
+  local ok, r = pcall(rex.exec, { "/usr/bin/stat", "-f", "%m", path })
+  return ok and r and r.code == 0 and tonumber((r.stdout or ""):match("%d+")) or nil
+end
+
+local function bot_stale(path)
+  local m = bot_mtime(path)
+  return m ~= nil and os.time() - m > BOT_LOCK_STALE
+end
+
+-- Removes the lock only if it is still stale once we hold <lock>.break (mkdir, like the lock), so two
+-- writers that both saw the same stale lock can't both remove it: the second re-checks and finds the first
+-- one's fresh lock. A break-lock older than 10s (a breaker that crashed while holding it) is removed.
+-- Same protocol as breakStaleLock in src/share.ts. Returns true when this call removed the lock.
+local function bot_break()
+  local ok, r = pcall(rex.exec, { "/bin/mkdir", BOT_BREAK })
+  if not (ok and r and r.code == 0) then
+    if bot_stale(BOT_BREAK) then os.remove(BOT_BREAK) end
+    return false
+  end
+  local removed = false
+  if bot_stale(BOT_LOCK) then removed = os.remove(BOT_LOCK) and true or false end
+  os.remove(BOT_BREAK)
+  return removed
+end
+
 local function bot_lock()
   for _ = 1, BOT_LOCK_TRIES do
     local ok, r = pcall(rex.exec, { "/bin/mkdir", BOT_LOCK })
     if ok and r and r.code == 0 then return end
-    local okm, m = pcall(rex.exec, { "/usr/bin/stat", "-f", "%m", BOT_LOCK })
-    local mtime = okm and m and m.code == 0 and tonumber((m.stdout or ""):match("%d+"))
+    local mtime = bot_mtime(BOT_LOCK)
     if mtime then
-      if os.time() - mtime > BOT_LOCK_STALE then os.remove(BOT_LOCK) end
-      pcall(rex.exec, { "/bin/sleep", "0.05" })
+      if not (os.time() - mtime > BOT_LOCK_STALE and bot_break()) then
+        pcall(rex.exec, { "/bin/sleep", "0.05" })
+      end
     elseif not bot_exists(BOT_LOCK) and not bot_exists(BOT_DIR) then
       error("cannot write " .. BOT_SHARED .. " (run `rex-grokbot setup` first)", 0)
     end

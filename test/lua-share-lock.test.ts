@@ -7,7 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, rmdir, utimes, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rmdir, stat, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { findRex } from "../src/context.js";
@@ -34,8 +34,9 @@ async function home() {
 /**
  * Loads the palette actions with HOME=home, then calls the "Bot: Share / Unshare This Pane" action once per id
  * (in order). Each call's outcome ("ok" or "err <message>") is a line of the result. Alerts are stubbed.
+ * `started`, when given, is created just before the first toggle (the Lua side is loaded and about to lock).
  */
-async function toggle(h: string, ids: string[]): Promise<string[]> {
+async function toggle(h: string, ids: string[], started?: string): Promise<string[]> {
   const dir = await tempDir();
   const out = join(dir, "out.txt");
   const harness = `
@@ -48,6 +49,7 @@ rex = {
   session = { list_blocks = function() return { blocks = {} } end },
 }
 dofile(${lstr(join(ROOT, "lua/rex-grokbot-actions.lua"))})
+${started ? `do local m = assert(io.open(${lstr(started)}, "w")); m:close() end` : ""}
 local f = assert(io.open(${lstr(out)}, "w"))
 for _, id in ipairs({ ${ids.map(lstr).join(", ")} }) do
   local ok, err = pcall(actions.bot_share_pane_toggle.run, { block_id = id }, {})
@@ -79,16 +81,64 @@ test("T427 lua: the toggle adds/removes and leaves no lock or temp file behind",
   assert.deepEqual((await readdir(join(h, ".config/rex-grokbot-bridge"))).sort(), ["shared"]);
 });
 
+/** Resolves once `path` exists (polling), or rejects after `ms`. */
+async function appears(path: string, ms = 30_000): Promise<void> {
+  const until = Date.now() + ms;
+  while (!existsSync(path)) {
+    if (Date.now() > until) throw new Error(`${path} never appeared`);
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
+
 test("T427 lua: the toggle waits for a held lock, then writes and releases", { skip }, async () => {
   const { home: h, file } = await home();
   await writeFile(file, `${S1}\n`);
   await mkdir(lockPath(file));
-  const started = Date.now();
-  setTimeout(() => void rmdir(lockPath(file)), 800);
-  assert.deepEqual(await toggle(h, [A]), ["ok"]);
-  assert.ok(Date.now() - started >= 800, "waited for the holder");
+  const started = join(await tempDir(), "started");
+  const run = toggle(h, [A], started);
+  // Release only once the Lua side is loaded and trying to lock, and some time after.
+  await appears(started);
+  await new Promise((r) => setTimeout(r, 400));
+  assert.equal(await readFile(file, "utf8"), `${S1}\n`, "nothing written while the lock is held");
+  const released = Date.now();
+  await rmdir(lockPath(file));
+  assert.deepEqual(await run, ["ok"]);
+  assert.ok((await stat(file)).mtimeMs >= released - 5, "the write happened after the release");
   assert.deepEqual(parseShared(await readFile(file, "utf8")), [S1, A]);
   assert.ok(!existsSync(lockPath(file)));
+});
+
+test("T427 lua: a stale lock is not broken while another breaker holds the break-lock", { skip }, async () => {
+  const { home: h, file } = await home();
+  const lock = lockPath(file);
+  const brk = `${lock}.break`;
+  await mkdir(lock);
+  await mkdir(brk);
+  const old = new Date(Date.now() - 20_000);
+  await utimes(lock, old, old);
+  const started = join(await tempDir(), "started");
+  const run = toggle(h, [A], started);
+  await appears(started);
+  await new Promise((r) => setTimeout(r, 400));
+  assert.ok(existsSync(lock) && existsSync(brk), "stale lock and the other breaker's break-lock left alone");
+  await rmdir(brk); // the other breaker is done (it found the lock fresh, say); now ours may break it
+  assert.deepEqual(await run, ["ok"]);
+  assert.deepEqual(parseShared(await readFile(file, "utf8")), [A]);
+  assert.ok(!existsSync(lock) && !existsSync(brk));
+});
+
+test("T427 lua: a break-lock older than 10s (crashed breaker) is removed, then the stale lock is broken", { skip }, async () => {
+  const { home: h, file } = await home();
+  const lock = lockPath(file);
+  const brk = `${lock}.break`;
+  await mkdir(lock);
+  await mkdir(brk);
+  const old = new Date(Date.now() - 20_000);
+  await utimes(lock, old, old);
+  await utimes(brk, old, old);
+  assert.deepEqual(await toggle(h, [A]), ["ok"]);
+  assert.deepEqual(parseShared(await readFile(file, "utf8")), [A]);
+  assert.ok(!existsSync(lock) && !existsSync(brk));
 });
 
 test("T427 lua: a lock held past ~3s fails cleanly, file unchanged, the holder's lock left alone", { skip }, async () => {
@@ -109,7 +159,7 @@ test("T427 lua: a stale lock (older than 10s) is broken", { skip }, async () => 
   await utimes(lockPath(file), old, old);
   assert.deepEqual(await toggle(h, [A]), ["ok"]);
   assert.deepEqual(parseShared(await readFile(file, "utf8")), [A]);
-  assert.ok(!existsSync(lockPath(file)));
+  assert.ok(!existsSync(lockPath(file)) && !existsSync(`${lockPath(file)}.break`));
 });
 
 test("T427 lua: no setup yet (no config dir) fails at once with the setup hint", { skip }, async () => {

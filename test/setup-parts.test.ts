@@ -257,3 +257,28 @@ test("T449 setup rex: a sandbox HOME never reloads, installed or unchanged", asy
   assert.ok(!rexCalls.includes("config reload"), rexCalls.join("\n"));
   assert.match(f.out.join("\n"), /Palette actions already in[\s\S]*was not reloaded/);
 });
+
+for (const [what, reload] of [
+  ["throws (timeout / spawn failure)", async () => { throw new Error("timed out"); }],
+  ["exits non-zero", async () => ({ stdout: "", stderr: "no server", code: 1 })],
+] as const) {
+  test(`T449 setup: a \`rex config reload\` that ${what} is a warning and setup carries on`, async () => {
+    const f = await fakeCtx(ok("{}"));
+    f.ctx.sleep = instant;
+    f.ctx.launchctl = goodLaunchctl([]);
+    f.ctx.realHome = f.ctx.paths.home;
+    const inner = f.ctx.rex;
+    f.ctx.rex = async (args, opts) => (args[0] === "config" && args[1] === "reload" ? reload() : inner(args, opts));
+    await mkdir(dirname(f.ctx.paths.rexInitLua), { recursive: true });
+    await writeFile(f.ctx.paths.rexInitLua, "-- mine\n");
+    for (const r of f.ctx.paths.skillRoots) await mkdir(r, { recursive: true });
+    const code = await setup(f.ctx, { ...ALL }, makePrompter(true));
+    const out = f.out.join("\n");
+    assert.match(out, /`rex config reload` failed\./);
+    assert.doesNotMatch(out, /Rex config reloaded/);
+    // Later sections still ran: the skill is installed and the full Next block is printed.
+    assert.ok(existsSync(`${f.ctx.paths.skillRoots[0]}/skills/rex-grokbot/SKILL.md`), out);
+    assert.ok(out.includes(NEXT_BLOCK.split("\n")[0]!), out);
+    assert.equal(typeof code, "number");
+  });
+}
