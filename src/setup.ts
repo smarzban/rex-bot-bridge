@@ -126,6 +126,9 @@ async function settingsSection(ctx: Ctx, out: Printer, flags: SetupFlags, p: Pro
   return s;
 }
 
+export const RELAUNCH_NOTE =
+  "If the Rex palette doesn't show the Bot: actions, quit and reopen the Rex app (your Rex sessions keep running; the server is separate).";
+
 async function rexSection(ctx: Ctx, out: Printer): Promise<void> {
   const { paths } = ctx;
   const actionsPath = join(ctx.pkgRoot, "lua/rex-grokbot-actions.lua");
@@ -138,14 +141,15 @@ async function rexSection(ctx: Ctx, out: Printer): Promise<void> {
     out.fail(`rex config check failed after editing ${paths.rexInitLua}; restored the previous file.\n${r.detail}`, `Fix ${paths.rexInitLua} (rex config check), then: rex-grokbot setup rex`);
   } else {
     out.ok(`Palette actions ${r.status === "unchanged" ? "already in" : "added to"} ${paths.rexInitLua}${r.backup ? ` (backup: ${r.backup})` : ""}`);
-    if (r.status === "installed") {
-      if (isSandboxHome(ctx, userInfo().homedir)) {
-        out.note("(HOME is not your account's home, so the running Rex server was not reloaded.)");
-      } else {
-        const rl = await ctx.rex(["config", "reload"]);
-        if (rl.code === 0) out.ok("Rex config reloaded");
-        else out.warn("`rex config reload` failed.", "rex config reload");
-      }
+    // Always reload, also when the block is unchanged: it dofile's the package's Lua, whose content
+    // changes on an upgrade while the block itself doesn't.
+    if (isSandboxHome(ctx, ctx.realHome ?? userInfo().homedir)) {
+      out.note("(HOME is not your account's home, so the running Rex server was not reloaded.)");
+    } else {
+      const rl = await ctx.rex(["config", "reload"]);
+      if (rl.code === 0) out.ok("Rex config reloaded");
+      else out.warn("`rex config reload` failed.", "rex config reload");
+      out.note(RELAUNCH_NOTE);
     }
   }
 }

@@ -22,6 +22,8 @@ export interface Ctx {
   sleep?: (ms: number) => Promise<void>;
   out: (s: string) => void;
   err: (s: string) => void;
+  /** The account's real home (tests only; default os.userInfo().homedir). */
+  realHome?: string;
 }
 
 const missing =

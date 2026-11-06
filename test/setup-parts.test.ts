@@ -216,3 +216,44 @@ test("T429 FR1-A: --purge with no backups doesn't claim any were kept", async ()
   assert.ok(!f.out.join("\n").includes("backups kept"));
 });
 
+
+test("T449 setup rex: reloads the Rex config when the block is added AND when it's unchanged (upgrade)", async () => {
+  const f = await fakeCtx(ok("{}"));
+  f.ctx.realHome = f.ctx.paths.home; // not a sandbox HOME for this test; init.lua is still in the temp dir
+  const rexCalls: string[] = [];
+  const inner = f.ctx.rex;
+  f.ctx.rex = async (args, opts) => {
+    rexCalls.push(args.join(" "));
+    return inner(args, opts);
+  };
+  await mkdir(dirname(f.ctx.paths.rexInitLua), { recursive: true });
+  await writeFile(f.ctx.paths.rexInitLua, "-- mine\n");
+  const reloads = () => rexCalls.filter((c) => c === "config reload").length;
+
+  assert.equal(await setup(f.ctx, { ...ALL }, makePrompter(true), "rex"), 0, f.out.join("\n"));
+  assert.match(f.out.join("\n"), /Palette actions added to/);
+  assert.equal(reloads(), 1);
+
+  f.out.length = 0;
+  assert.equal(await setup(f.ctx, { ...ALL }, makePrompter(true), "rex"), 0, f.out.join("\n"));
+  const out = f.out.join("\n");
+  assert.match(out, /Palette actions already in/);
+  assert.equal(reloads(), 2, "unchanged block still reloads");
+  assert.match(out, /Rex config reloaded/);
+  assert.match(out, /quit and reopen the Rex app/);
+});
+
+test("T449 setup rex: a sandbox HOME never reloads, installed or unchanged", async () => {
+  const f = await fakeCtx(ok("{}"));
+  const rexCalls: string[] = [];
+  const inner = f.ctx.rex;
+  f.ctx.rex = async (args, opts) => {
+    rexCalls.push(args.join(" "));
+    return inner(args, opts);
+  };
+  await mkdir(dirname(f.ctx.paths.rexInitLua), { recursive: true });
+  await writeFile(f.ctx.paths.rexInitLua, "-- mine\n");
+  for (let i = 0; i < 2; i++) assert.equal(await setup(f.ctx, { ...ALL }, makePrompter(true), "rex"), 0);
+  assert.ok(!rexCalls.includes("config reload"), rexCalls.join("\n"));
+  assert.match(f.out.join("\n"), /Palette actions already in[\s\S]*was not reloaded/);
+});
