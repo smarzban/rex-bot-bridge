@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.7.0 — 2026-11-06
+
+Watch a single pane, not just a whole session, and `rex-grokbot say` respects the watch list.
+
+Seen live: the person watched only the coordinator's session, and the bot was notified about another agent that
+was a pane in a different window of that same session (a watched session covers every pane in it). And any agent
+with the skill could message the bot with `rex-grokbot say` from an unwatched session.
+
+- **Pane-level watch.** The `watched` file now holds `session:<uuid>` and/or `block:<uuid>` lines; any other
+  token is ignored. A watched session covers every pane in it (unchanged); a watched pane covers only that pane.
+  One parser, `lua/watchlist.lua`, is shared by the watcher and the palette and kept in step with `src/watch.ts`
+  (a test runs both on the same inputs).
+- **Watcher:** notifies for a status event when its pane or its session is watched (also rechecked after the
+  debounce).
+- **Bridge gating (watched mode):** `read_pane`, `send_message`, `send_keys`, `close_pane` and `wait_for_status`
+  are allowed when the pane or its session is watched. `close_session` and `spawn_agent` into an existing session
+  need the session itself watched; a watched pane is not enough. Refusals name the pane/session and how to opt it
+  in. New tools `watch_pane` (refused in watched mode, like `watch_session`) and `unwatch_pane`. `list_watched`
+  returns `sessions` and `panes` (the `sessions_file`/`watched` fields are now `watched_file`/`sessions`/`panes`),
+  `list_agents` marks each pane's `watched`, `bridge_status` adds `watched_sessions`/`watched_panes`.
+  `close_pane`/`close_session` drop their entries from the list.
+- **CLI:** `rex-grokbot watch add|remove` take a session or block id; `watch list` prints the kind, id and label
+  (from a running Rex server only; it never starts one).
+- **Palette:** new **Bot: Watch / Unwatch This Pane** (the focused pane, same alert feedback); **Bot: List Watched
+  Sessions** is now **Bot: List Watched** and shows both kinds.
+- **`rex-grokbot say`** sends only when `REX_BLOCK` or its `REX_SESSION` is watched. Otherwise (or outside Rex)
+  it prints one "not sent" line to stderr and exits 0. The agent skill says so.
+- **Grok Bot guide:** the connector is named `Rex`; the routine prompt handles `kind: auth` (tell the owner what
+  is needed, never paste credentials), replies to every `doctor_test` (never a duplicate), is written as intent
+  rather than tool names, and sends results to the owner in that chat; steps 2 and 3 share one
+  `rex-grokbot url`; reachability is a Tailscale host:port check followed by an HTTP GET of healthz; Node 22+ and
+  npm are listed as prerequisites; watch scope (session vs pane, listing is not notification) and both ways to
+  opt in; `rex-usage` covers pane vs session watch and `say` gating.
+- **Docs render on GitHub:** no bare `<…>` placeholders in prose (the README command table escapes them); a test
+  checks README, the guide, the skill and the changelog.
+
 ## 0.6.0 — 2026-11-06
 
 The project is now **rex-grokbot-bridge**, and the Grok Bot guide is written for the bot. There are no existing
