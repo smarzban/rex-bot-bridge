@@ -2,10 +2,13 @@
 // Outside fenced blocks and inline code they must be backticked or escaped (&lt;…&gt;).
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readdirSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const ROOT = join(import.meta.dirname, "..");
+/** Private, per-working-copy files (in .gitignore): never published, so not checked. */
+const GITIGNORED = new Set(["AGENTS.local.md", "HANDOFF.md"]);
 
 /** Bare <…> left in the prose of a Markdown file (code, comments, <br> and autolinks are fine). */
 export function barePlaceholders(md: string): string[] {
@@ -27,7 +30,22 @@ test("the checker finds bare placeholders and ignores code, comments, <br> and a
   assert.deepEqual(barePlaceholders("escaped &lt;mac&gt; is fine"), []);
 });
 
-for (const file of ["README.md", "docs/grok-bot.md", "templates/SKILL.md", "CHANGELOG.md"]) {
+// Every Markdown file a reader sees: root .md files, docs/*.md, .github templates, and the agent skill template.
+const MD_FILES = [
+  ...readdirSync(ROOT).filter((f) => f.endsWith(".md") && !GITIGNORED.has(f)),
+  ...readdirSync(join(ROOT, "docs")).filter((f) => f.endsWith(".md")).map((f) => `docs/${f}`),
+  ...readdirSync(join(ROOT, ".github/ISSUE_TEMPLATE")).filter((f) => f.endsWith(".md")).map((f) => `.github/ISSUE_TEMPLATE/${f}`),
+  ".github/pull_request_template.md",
+  "templates/SKILL.md",
+];
+
+test("the placeholder check covers the docs that matter", () => {
+  for (const f of ["README.md", "CHANGELOG.md", "SECURITY.md", "CONTRIBUTING.md", "AGENTS.md", "docs/grok-bot.md", "docs/security.md", "docs/setup.md", "docs/reference.md", "docs/troubleshooting.md"]) {
+    assert.ok(MD_FILES.includes(f), f);
+  }
+});
+
+for (const file of MD_FILES) {
   test(`${file}: no bare <…> placeholders in prose`, async () => {
     assert.deepEqual(barePlaceholders(await readFile(join(ROOT, file), "utf8")), []);
   });
