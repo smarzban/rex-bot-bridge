@@ -26,11 +26,11 @@ export const TOOL_NAMES = [
   "wait_for_status",
   "close_pane",
   "close_session",
-  "watch_session",
-  "unwatch_session",
-  "watch_pane",
-  "unwatch_pane",
-  "list_watched",
+  "share_session",
+  "unshare_session",
+  "share_pane",
+  "unshare_pane",
+  "list_shared",
   "bridge_status",
 ] as const;
 
@@ -63,8 +63,8 @@ export function buildMcpServer(ops: Ops, audit: AuditLog): McpServer {
       description:
         "List every Rex session and its panes: session/block/window ids and labels, foreground process (name, cwd), " +
         "program status reported by the agent (state working|blocked|done|error|idle, kind permission|question|auth, app, msg) " +
-        "and whether the session (session.watched) or the pane (pane.watched: the pane or its session is on the list) is on " +
-        "the bot-watch list. Panes whose program does not report status have status=null; " +
+        "and whether the session (session.shared) or the pane (pane.shared: the pane or its session is on the list) is on " +
+        "the share list. Panes whose program does not report status have status=null; " +
         "use process.name as a fallback.",
       inputSchema: { session: z.string().optional().describe("Only this session (id or label)") },
       annotations: ro,
@@ -130,10 +130,10 @@ export function buildMcpServer(ops: Ops, audit: AuditLog): McpServer {
       description:
         "Start an agent in a new Rex pane. agent: claude|codex|pi|grok (prompt passed as the CLI's initial prompt), " +
         "shell (login shell, no prompt) or custom (command = argv array). Give session_id to open a new tab in an " +
-        "existing session, or new_session_label to create a new session. With watch=true (default) the session is " +
-        "added to the bot-watch list so status changes are pushed to the coordinator. Returns session_id and block_id. " +
-        "In watched mode (see bridge_status) session_id must be a watched session (a watched pane in it is not enough), " +
-        "a new session is always watched, and watch is ignored (the bot never adds an existing session to the list).",
+        "existing session, or new_session_label to create a new session. With share=true (default) the session is " +
+        "added to the share list so status changes are pushed to the coordinator. Returns session_id and block_id. " +
+        "In shared mode (see bridge_status) session_id must be a shared session (a shared pane in it is not enough), " +
+        "a new session is always shared, and share is ignored (the bot never adds an existing session to the list).",
       inputSchema: {
         agent: z.enum(AGENTS),
         cwd: z.string().min(1).describe("Absolute directory (or ~/...)"),
@@ -142,7 +142,7 @@ export function buildMcpServer(ops: Ops, audit: AuditLog): McpServer {
         new_session_label: LABEL.optional(),
         label: LABEL.optional().describe("Pane label"),
         command: z.array(z.string().min(1)).min(1).max(100).optional().describe("Only for agent=custom"),
-        watch: z.boolean().default(true),
+        share: z.boolean().default(true),
       },
     },
     wrap("spawn_agent", (a: Parameters<Ops["spawnAgent"]>[0]) => ops.spawnAgent(a)),
@@ -170,7 +170,7 @@ export function buildMcpServer(ops: Ops, audit: AuditLog): McpServer {
   server.registerTool(
     "close_pane",
     {
-      description: "Close a pane and end the program running in it (and drop the pane from the bot-watch list).",
+      description: "Close a pane and end the program running in it (and drop the pane from the share list).",
       inputSchema: { block_id: BLOCK_ID, session_id: SESSION_ID.optional() },
       annotations: { destructiveHint: true },
     },
@@ -181,8 +181,8 @@ export function buildMcpServer(ops: Ops, audit: AuditLog): McpServer {
     "close_session",
     {
       description:
-        "Kill a whole Rex session (every pane in it) and drop it and its panes from the bot-watch list. In watched " +
-        "mode the session itself must be watched; a watched pane in it is not enough.",
+        "Kill a whole Rex session (every pane in it) and drop it and its panes from the share list. In shared " +
+        "mode the session itself must be shared; a shared pane in it is not enough.",
       inputSchema: { session_id: SESSION_ID },
       annotations: { destructiveHint: true },
     },
@@ -190,63 +190,63 @@ export function buildMcpServer(ops: Ops, audit: AuditLog): McpServer {
   );
 
   server.registerTool(
-    "watch_session",
+    "share_session",
     {
       description:
-        "Add a session (every pane in it) to the bot-watch list so its agents' status changes are pushed to the " +
-        "coordinator. Only in full mode: in watched mode only the human can opt a session in.",
+        "Add a session (every pane in it) to the share list so its agents' status changes are pushed to the " +
+        "coordinator. Only in all mode: in shared mode only the person can share a session.",
       inputSchema: { session_id: SESSION_ID },
     },
-    wrap("watch_session", (a: { session_id: string }) => ops.watchSession(a.session_id)),
+    wrap("share_session", (a: { session_id: string }) => ops.shareSession(a.session_id)),
   );
 
   server.registerTool(
-    "unwatch_session",
+    "unshare_session",
     {
-      description: "Remove a session from the bot-watch list.",
+      description: "Remove a session from the share list.",
       inputSchema: { session_id: SESSION_ID },
     },
-    wrap("unwatch_session", (a: { session_id: string }) => ops.unwatchSession(a.session_id)),
+    wrap("unshare_session", (a: { session_id: string }) => ops.unshareSession(a.session_id)),
   );
 
   server.registerTool(
-    "watch_pane",
+    "share_pane",
     {
       description:
-        "Add one pane to the bot-watch list (only that pane, not the rest of its session). " +
-        "Only in full mode: in watched mode only the human can opt a pane in.",
+        "Add one pane to the share list (only that pane, not the rest of its session). " +
+        "Only in all mode: in shared mode only the person can share a pane.",
       inputSchema: { block_id: BLOCK_ID },
     },
-    wrap("watch_pane", (a: { block_id: string }) => ops.watchPane(a.block_id)),
+    wrap("share_pane", (a: { block_id: string }) => ops.sharePane(a.block_id)),
   );
 
   server.registerTool(
-    "unwatch_pane",
+    "unshare_pane",
     {
-      description: "Remove a pane from the bot-watch list (a watched session still covers it).",
+      description: "Remove a pane from the share list (a shared session still covers it).",
       inputSchema: { block_id: BLOCK_ID },
     },
-    wrap("unwatch_pane", (a: { block_id: string }) => ops.unwatchPane(a.block_id)),
+    wrap("unshare_pane", (a: { block_id: string }) => ops.unsharePane(a.block_id)),
   );
 
   server.registerTool(
-    "list_watched",
+    "list_shared",
     {
       description:
-        "List the bot-watch list: sessions (every pane in each) and panes (only that pane).",
+        "List the share list: sessions (every pane in each) and panes (only that pane).",
       inputSchema: {},
       annotations: ro,
     },
-    wrap("list_watched", () => ops.listWatched()),
+    wrap("list_shared", () => ops.listShared()),
   );
 
   server.registerTool(
     "bridge_status",
     {
       description:
-        "Bridge health and powers: mode (watched = pane tools only work on watched panes or panes in watched sessions, " +
-        "session tools only on watched sessions; full = every session), Rex version, watcher heartbeat age (s), " +
-        "number of watched sessions and panes, audit log path.",
+        "Bridge health and powers: mode (shared = pane tools only work on shared panes or panes in shared sessions, " +
+        "session tools only on shared sessions; all = every session), Rex version, watcher heartbeat age (s), " +
+        "number of shared sessions and panes, audit log path.",
       inputSchema: {},
       annotations: ro,
     },

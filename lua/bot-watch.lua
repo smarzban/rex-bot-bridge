@@ -1,21 +1,21 @@
--- bot-watch.lua: forward agent status changes in opted-in Rex sessions and panes to the coordinator's webhook.
+-- bot-watch.lua: forward agent status changes in Rex sessions and panes shared with the bot to the coordinator's webhook.
 --
 -- Started by `rex-grokbot watch` (the com.rexgrokbotbridge.watch launchd service), which runs
 --   rex do --all <package>/lua/bot-watch.lua
 -- with these environment variables set:
---   REX_GROKBOT_DIR   state dir holding `watched` (opt-in list) and `heartbeat`
+--   REX_GROKBOT_DIR   state dir holding `shared` (share list) and `heartbeat`
 --   REX_GROKBOT_NODE  absolute path of node
 --   REX_GROKBOT_CLI   absolute path of dist/cli/rex-grokbot.js (its `notify` command POSTs stdin to the webhook)
 --
 -- Fires when a pane's program status *enters* done / blocked / error and stays there for DEBOUNCE
--- seconds, if that pane or its session is on the watch list. Works for any program that speaks
+-- seconds, if that pane or its session is on the share list. Works for any program that speaks
 -- OSC 7501 (Claude Code and Pi do natively).
 
 local HOME = os.getenv("HOME") or ""
 local DIR = os.getenv("REX_GROKBOT_DIR") or (HOME .. "/.config/rex-grokbot-bridge")
 local NODE = os.getenv("REX_GROKBOT_NODE") or "node"
 local CLI = os.getenv("REX_GROKBOT_CLI")
-local WATCHED_FILE = DIR .. "/watched"
+local SHARED_FILE = DIR .. "/shared"
 local HEARTBEAT_FILE = DIR .. "/heartbeat"
 local TERMINAL = "com.superlogical.terminal"
 local DEBOUNCE = tonumber(os.getenv("BOT_WATCH_DEBOUNCE") or "") or 3
@@ -25,9 +25,9 @@ if not CLI or CLI == "" then
   error("REX_GROKBOT_CLI is not set; start the watcher with `rex-grokbot watch`", 0)
 end
 
--- watchlist.lua sits next to this file.
+-- sharelist.lua sits next to this file.
 local HERE = (debug.getinfo(1, "S").source:gsub("^@", "")):match("^(.*)/[^/]*$") or "."
-local WL = dofile(HERE .. "/watchlist.lua")
+local SL = dofile(HERE .. "/sharelist.lua")
 
 local function read_file(path)
   local f = io.open(path, "r")
@@ -36,9 +36,9 @@ local function read_file(path)
   return s
 end
 
--- The pane or its session is opted in. Re-read on every check so toggling needs no restart.
-local function watched(session_id, block_id)
-  return WL.covers(WL.parse(read_file(WATCHED_FILE)), session_id, block_id)
+-- The pane or its session is shared with the bot. Re-read on every check so toggling needs no restart.
+local function shared(session_id, block_id)
+  return SL.covers(SL.parse(read_file(SHARED_FILE)), session_id, block_id)
 end
 
 local function session_label(session_id)
@@ -84,7 +84,7 @@ rex.on("terminal.program_status_changed", function(ctx, ev)
   if last[key] == state then return end  -- msg/progress update, same state
   last[key] = state
   if timers[key] then timers[key]:cancel(); timers[key] = nil end
-  if not NOTIFY_STATES[state] or not watched(ctx.session_id, ctx.block_id) then return end
+  if not NOTIFY_STATES[state] or not shared(ctx.session_id, ctx.block_id) then return end
 
   local blabel, cwd = block_info(ctx.session_id, ctx.block_id)
   local payload = {
@@ -106,9 +106,9 @@ rex.on("terminal.program_status_changed", function(ctx, ev)
   timers[key] = rex.after(DEBOUNCE, function()
     timers[key] = nil
     if last[key] ~= state then return end
-    -- The human may have unwatched the pane or session during the debounce.
-    if not watched(sid, bid) then
-      print(os.date("!%Y-%m-%dT%H:%M:%SZ") .. " " .. state .. " " .. payload.rex_block .. " skipped: no longer watched")
+    -- The human may have unshared the pane or session during the debounce.
+    if not shared(sid, bid) then
+      print(os.date("!%Y-%m-%dT%H:%M:%SZ") .. " " .. state .. " " .. payload.rex_block .. " skipped: no longer shared")
       return
     end
     send(payload)

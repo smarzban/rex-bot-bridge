@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 import { Rex, type ProcessInfo, type StatusRecord } from "./rex.js";
 import type { Mode } from "./settings.js";
-import { covers, WatchFile } from "./watch.js";
+import { covers, ShareFile } from "./share.js";
 
 export class BridgeError extends Error {
   constructor(message: string) {
@@ -27,21 +27,21 @@ export interface PaneInfo {
   window_label?: string;
   process: ProcessInfo | null;
   status: StatusRecord | null;
-  /** The bot may read/drive this pane in watched mode: the pane or its session is on the watch list. */
-  watched: boolean;
+  /** The bot may read/drive this pane in shared mode: the pane or its session is on the share list. */
+  shared: boolean;
 }
 
 export interface SessionInfo {
   session_id: string;
   session_label?: string;
-  /** The session itself is on the watch list (every pane in it is covered). */
-  watched: boolean;
+  /** The session itself is on the share list (every pane in it is covered). */
+  shared: boolean;
   panes: PaneInfo[];
 }
 
 export interface OpsDeps {
   rex: Rex;
-  watch: WatchFile;
+  shares: ShareFile;
   heartbeatFile: string;
   auditLogPath: string;
   /** For tests: replaces setTimeout-based sleeping in wait_for_status. */
@@ -50,28 +50,19 @@ export interface OpsDeps {
   pollMs?: number;
   /** Delay between a paste and the Enter that submits it (default 150ms). */
   pasteSettleMs?: number;
-  /** Powers: "watched" limits pane/session tools to watched sessions. Read per call. Required (fail closed). */
+  /** Powers: "shared" limits pane/session tools to shared sessions. Read per call. Required (fail closed). */
   mode: () => Promise<Mode>;
 }
 
-/** How the human opts a pane (or its whole session) in. Only the human adds entries in watched mode. */
-export function paneOptInHint(blockId: string, sessionId: string): string {
+/** How the person shares a pane or session with the bot. Only the person shares, in shared mode. */
+export function shareHint(id: string): string {
   return (
-    'Ask the human to opt it in: Rex command palette "Bot: Watch / Unwatch This Pane" (only that pane) or ' +
-    '"Bot: Watch / Unwatch This Session" (every pane in it), or `rex-grokbot watch add ' +
-    `${blockId}\` / \`rex-grokbot watch add ${sessionId}\``
+    "the person can share it from the Rex palette (Bot: Share / Unshare This Pane, or This Session) or " +
+    `\`rex-grokbot share add ${id}\``
   );
 }
 
-/** Session-level actions need the session itself watched; a watched pane is not enough. */
-export function sessionOptInHint(sessionId: string): string {
-  return (
-    'Ask the human to watch the whole session: Rex command palette "Bot: Watch / Unwatch This Session" in it, ' +
-    `or \`rex-grokbot watch add ${sessionId}\`. A watched pane alone does not allow session-level actions`
-  );
-}
-
-const FULL_MODE_NOTE = "The Mac's owner can allow every session with `rex-grokbot config set mode full`.";
+const ALL_MODE_NOTE = "(The Mac's owner can share every session with `rex-grokbot config set mode all`.)";
 
 /** Runs fn over items with at most `limit` in flight. */
 async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> {
@@ -92,7 +83,7 @@ const orNull = <T>(p: Promise<T>): Promise<T | null> => p.catch(() => null);
 /** Every bridge operation, independent of MCP so it can be unit-tested with a fake rex runner. */
 export class Ops {
   private readonly rex: Rex;
-  private readonly watch: WatchFile;
+  private readonly shares: ShareFile;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly now: () => number;
   private readonly pollMs: number;
@@ -102,7 +93,7 @@ export class Ops {
   constructor(private readonly deps: OpsDeps) {
     this.mode = deps.mode;
     this.rex = deps.rex;
-    this.watch = deps.watch;
+    this.shares = deps.shares;
     this.sleep = deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
     this.now = deps.now ?? Date.now;
     this.pollMs = deps.pollMs ?? 1000;
@@ -121,35 +112,35 @@ export class Ops {
   }
 
   /**
-   * Session-scoped tools (close_session, spawn_agent into an existing session). In watched mode, refuses
-   * unless the session itself is on the watch list: a watched pane in it does not count.
+   * Session-scoped tools (close_session, spawn_agent into an existing session). In shared mode, refuses
+   * unless the session itself is on the share list: a shared pane in it does not count.
    */
   private async gateSession(tool: string, sessionId: string): Promise<void> {
-    if ((await this.mode()) === "full") return;
-    if ((await this.watch.sessions()).includes(sessionId)) return;
+    if ((await this.mode()) === "all") return;
+    if ((await this.shares.sessions()).includes(sessionId)) return;
     throw new BridgeError(
-      `${tool} refused: the bridge is in "watched" mode and session ${sessionId} is not watched. ` +
-        `${sessionOptInHint(sessionId)}. ${FULL_MODE_NOTE}`,
+      `${tool} refused: session ${sessionId} isn't shared with the bot; ${shareHint(sessionId)}. ` +
+        `A shared pane alone does not allow session-level actions. ${ALL_MODE_NOTE}`,
     );
   }
 
-  /** Block-scoped tools. In watched mode, refuses unless the pane or its session is on the watch list. */
+  /** Block-scoped tools. In shared mode, refuses unless the pane or its session is on the share list. */
   private async gateBlock(tool: string, sessionId: string, blockId: string): Promise<void> {
-    if ((await this.mode()) === "full") return;
-    if (await this.watch.covers(sessionId, blockId)) return;
+    if ((await this.mode()) === "all") return;
+    if (await this.shares.covers(sessionId, blockId)) return;
     throw new BridgeError(
-      `${tool} refused: the bridge is in "watched" mode and pane ${blockId} (session ${sessionId}) is not watched, ` +
-        `nor is its session. ${paneOptInHint(blockId, sessionId)}. ${FULL_MODE_NOTE}`,
+      `${tool} refused: pane ${blockId} isn't shared with the bot (nor is its session ${sessionId}); ` +
+        `${shareHint(blockId)}, or \`rex-grokbot share add ${sessionId}\` for the whole session. ${ALL_MODE_NOTE}`,
     );
   }
 
   /**
-   * Session that owns blockId, gated. In watched mode a caller-supplied session_id is verified to really
-   * own the block, so a watched session id cannot be paired with a block from an unwatched one.
+   * Session that owns blockId, gated. In shared mode a caller-supplied session_id is verified to really
+   * own the block, so a shared session id cannot be paired with a block from an unshared one.
    */
   private async target(tool: string, blockId: string, sessionId?: string): Promise<string> {
     const session = await this.resolveSession(blockId, sessionId);
-    if ((await this.mode()) === "full") return session;
+    if ((await this.mode()) === "all") return session;
     if (sessionId) {
       const blocks = await this.rex.blocks(session).catch(() => []);
       if (!blocks.some((b) => b.block_id === blockId)) {
@@ -161,7 +152,7 @@ export class Ops {
   }
 
   async listAgents(filterSession?: string): Promise<{ sessions: SessionInfo[] }> {
-    const [all, watched] = await Promise.all([this.rex.sessions(), this.watch.list()]);
+    const [all, shared] = await Promise.all([this.rex.sessions(), this.shares.list()]);
     const sessions = filterSession
       ? all.filter((s) => s.session_id === filterSession || s.label === filterSession)
       : all;
@@ -183,10 +174,10 @@ export class Ops {
           window_label: b.window_id ? windows.get(b.window_id) : undefined,
           process,
           status,
-          watched: covers(watched, s.session_id, b.block_id),
+          shared: covers(shared, s.session_id, b.block_id),
         };
       });
-      return { session_id: s.session_id, session_label: s.label, watched: watched.includes(s.session_id), panes };
+      return { session_id: s.session_id, session_label: s.label, shared: shared.includes(s.session_id), panes };
     });
     return { sessions: result };
   }
@@ -239,7 +230,7 @@ export class Ops {
     new_session_label?: string;
     label?: string;
     command?: string[];
-    watch: boolean;
+    share: boolean;
   }) {
     if (opts.session_id && opts.new_session_label) {
       throw new BridgeError("give either session_id (new tab) or new_session_label (new session), not both");
@@ -247,7 +238,7 @@ export class Ops {
     if (!opts.session_id && !opts.new_session_label) {
       throw new BridgeError("give session_id (new tab in that session) or new_session_label (new session)");
     }
-    const watchedMode = (await this.mode()) === "watched";
+    const sharedMode = (await this.mode()) === "shared";
     if (opts.session_id) await this.gateSession("spawn_agent", opts.session_id);
     const cwd = expandHome(opts.cwd);
     if (!isAbsolute(cwd)) throw new BridgeError(`cwd must be an absolute path (or start with ~): ${opts.cwd}`);
@@ -264,23 +255,23 @@ export class Ops {
       res = await this.rex.newSession(opts.new_session_label as string, cwd, argv);
       if (opts.label) await this.rex.renameBlock(res.session_id, res.block_id, opts.label);
     }
-    let watched: boolean;
-    if (watchedMode) {
+    let shared: boolean;
+    if (sharedMode) {
       // Only a session the bot just created is added (or it could not reach its own agent). An existing
-      // session is never (re-)added: the human may have unwatched it while the spawn was in flight.
+      // session is never (re-)added: the human may have unshared it while the spawn was in flight.
       if (opts.new_session_label) {
-        await this.watch.add(res.session_id);
-        watched = true;
+        await this.shares.add(res.session_id);
+        shared = true;
       } else {
-        watched = (await this.watch.sessions()).includes(res.session_id);
+        shared = (await this.shares.sessions()).includes(res.session_id);
       }
-    } else if (opts.watch) {
-      await this.watch.add(res.session_id);
-      watched = true;
+    } else if (opts.share) {
+      await this.shares.add(res.session_id);
+      shared = true;
     } else {
-      watched = (await this.watch.sessions()).includes(res.session_id);
+      shared = (await this.shares.sessions()).includes(res.session_id);
     }
-    return { ...res, agent: opts.agent, argv, cwd, watched };
+    return { ...res, agent: opts.agent, argv, cwd, shared };
   }
 
   async waitForStatus(blockId: string, sessionId: string | undefined, states: string[], timeoutS: number) {
@@ -288,7 +279,7 @@ export class Ops {
     const deadline = this.now() + timeoutS * 1000;
     let last: StatusRecord | null = null;
     for (;;) {
-      // Access can be revoked mid-wait (unwatched, or mode switched to watched): recheck before each poll.
+      // Access can be revoked mid-wait (unshared, or mode switched to shared): recheck before each poll.
       await this.gateBlock("wait_for_status", session, blockId);
       last = await this.rex.status(session, blockId);
       if (last && states.includes(last.state)) {
@@ -304,57 +295,57 @@ export class Ops {
   async closePane(blockId: string, sessionId?: string) {
     const session = await this.target("close_pane", blockId, sessionId);
     await this.rex.closeBlock(session, blockId);
-    const unwatched = await this.watch.remove(blockId);
-    return { session_id: session, block_id: blockId, closed: true, removed_from_watch_list: unwatched };
+    const unshared = await this.shares.remove(blockId);
+    return { session_id: session, block_id: blockId, closed: true, removed_from_share_list: unshared };
   }
 
   async closeSession(sessionId: string) {
     await this.gateSession("close_session", sessionId);
     const blocks = await this.rex.blocks(sessionId).catch(() => []);
     await this.rex.killSession(sessionId);
-    let unwatched = await this.watch.remove(sessionId);
+    let unshared = await this.shares.remove(sessionId);
     // Pane entries of a closed session would only go stale.
-    for (const b of blocks) if (await this.watch.remove(b.block_id)) unwatched = true;
-    return { session_id: sessionId, closed: true, removed_from_watch_list: unwatched };
+    for (const b of blocks) if (await this.shares.remove(b.block_id)) unshared = true;
+    return { session_id: sessionId, closed: true, removed_from_share_list: unshared };
   }
 
-  private async refuseBotWatch(tool: string, id: string): Promise<void> {
-    if ((await this.mode()) === "watched") {
+  private async refuseBotShare(tool: string, id: string): Promise<void> {
+    if ((await this.mode()) === "shared") {
       const pane = id.startsWith("block:");
       throw new BridgeError(
-        `${tool} refused: the bridge is in "watched" mode, where only the human adds ${pane ? "panes" : "sessions"}. ` +
-          `Ask the human to opt ${pane ? "pane" : "session"} ${id} in (Rex command palette ` +
-          `"Bot: Watch / Unwatch ${pane ? "This Pane" : "This Session"}", or \`rex-grokbot watch add ${id}\`).`,
+        `${tool} refused: in shared mode only the person shares ${pane ? "panes" : "sessions"} with the bot; ` +
+          `${pane ? "pane" : "session"} ${id} isn't shared. The person can share it from the Rex palette ` +
+          `(Bot: Share / Unshare ${pane ? "This Pane" : "This Session"}) or \`rex-grokbot share add ${id}\`.`,
       );
     }
   }
 
-  async watchSession(sessionId: string) {
-    await this.refuseBotWatch("watch_session", sessionId);
-    const changed = await this.watch.add(sessionId);
-    return { session_id: sessionId, watched: true, changed };
+  async shareSession(sessionId: string) {
+    await this.refuseBotShare("share_session", sessionId);
+    const changed = await this.shares.add(sessionId);
+    return { session_id: sessionId, shared: true, changed };
   }
 
-  async unwatchSession(sessionId: string) {
-    const changed = await this.watch.remove(sessionId);
-    return { session_id: sessionId, watched: false, changed };
+  async unshareSession(sessionId: string) {
+    const changed = await this.shares.remove(sessionId);
+    return { session_id: sessionId, shared: false, changed };
   }
 
-  async watchPane(blockId: string) {
-    await this.refuseBotWatch("watch_pane", blockId);
-    const changed = await this.watch.add(blockId);
-    return { block_id: blockId, watched: true, changed };
+  async sharePane(blockId: string) {
+    await this.refuseBotShare("share_pane", blockId);
+    const changed = await this.shares.add(blockId);
+    return { block_id: blockId, shared: true, changed };
   }
 
-  async unwatchPane(blockId: string) {
-    const changed = await this.watch.remove(blockId);
-    return { block_id: blockId, watched: false, changed };
+  async unsharePane(blockId: string) {
+    const changed = await this.shares.remove(blockId);
+    return { block_id: blockId, shared: false, changed };
   }
 
-  async listWatched() {
-    const all = await this.watch.list();
+  async listShared() {
+    const all = await this.shares.list();
     return {
-      watched_file: this.watch.path,
+      shared_file: this.shares.path,
       sessions: all.filter((id) => id.startsWith("session:")),
       panes: all.filter((id) => id.startsWith("block:")),
     };
@@ -388,19 +379,19 @@ export class Ops {
   }
 
   async bridgeStatus() {
-    const [version, heartbeat, watched, mode] = await Promise.all([
+    const [version, heartbeat, shared, mode] = await Promise.all([
       this.rex.version().catch((e: Error) => ({ error: e.message })),
       this.heartbeatAgeS(),
-      this.watch.list().catch(() => []),
+      this.shares.list().catch(() => []),
       this.mode(),
     ]);
     return {
       mode,
       rex: version,
       watcher_heartbeat_age_s: heartbeat,
-      watched_count: watched.length,
-      watched_sessions: watched.filter((id) => id.startsWith("session:")).length,
-      watched_panes: watched.filter((id) => id.startsWith("block:")).length,
+      shared_count: shared.length,
+      shared_sessions: shared.filter((id) => id.startsWith("session:")).length,
+      shared_panes: shared.filter((id) => id.startsWith("block:")).length,
       audit_log: this.deps.auditLogPath,
     };
   }

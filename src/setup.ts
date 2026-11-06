@@ -46,11 +46,11 @@ const SECTION_TITLES: Record<Part, string> = {
 };
 
 const MODE_HELP = `Powers for the bot:
-  watched  (recommended) the bot can only read, type into, and close panes you opted in, one by one
-           or a whole session at a time (palette "Bot: Watch / Unwatch This Pane" / "... This Session",
-           or \`rex-grokbot watch add <block|session>\`), plus new sessions it spawns. It can list every
-           session.
-  full     the bot can drive every Rex session on this Mac.`;
+  shared  (recommended) the bot can only read, type into, and close what you share with it: one pane
+          or a whole session at a time (palette "Bot: Share / Unshare This Pane" / "... This Session",
+          or \`rex-grokbot share add <block|session>\`), plus new sessions it spawns. It can list every
+          session.
+  all     the bot can drive every Rex session on this Mac.`;
 
 /** One printer per run: numbered section headers, and ✅/⚠️/❌ lines with an optional fix line. */
 function printer(ctx: Ctx) {
@@ -116,7 +116,7 @@ async function settingsSection(ctx: Ctx, out: Printer, flags: SetupFlags, p: Pro
     s.mode = flags.mode;
   } else if (!hadSettings) {
     ctx.out("\n" + MODE_HELP);
-    s.mode = await p.choose("Mode", MODES, "watched");
+    s.mode = await p.choose("Mode", MODES, "shared");
   }
   out.ok(`Mode: ${s.mode}${hadSettings && !flags.mode ? " (kept)" : ""}`);
   // A fresh install has no webhook yet; that's step 2 under Next, not a problem, so no warning.

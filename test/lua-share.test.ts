@@ -1,5 +1,5 @@
-// T435: the Lua side of the watch list. lua/watchlist.lua must agree with src/watch.ts, and the watcher
-// (lua/bot-watch.lua) must notify when the event's pane OR its session is watched, and only then.
+// T435: the Lua side of the share list. lua/sharelist.lua must agree with src/share.ts, and the watcher
+// (lua/bot-watch.lua) must notify when the event's pane OR its session is shared, and only then.
 // The Lua runs offline under `rex config check` (it loads a file with this rex binary's Lua, no server),
 // with a stub `rex` table for the watcher. Skipped when rex isn't on PATH.
 import { test } from "node:test";
@@ -9,7 +9,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { findRex } from "../src/context.js";
-import { covers, parseWatched } from "../src/watch.js";
+import { covers, parseShared } from "../src/share.js";
 import { childEnv, tempDir } from "./helpers.js";
 
 const run = promisify(execFile);
@@ -54,11 +54,11 @@ const ASKS: [string, string][] = [
   [S2, B],
 ];
 
-test("lua/watchlist.lua parses and decides exactly like src/watch.ts", { skip }, async () => {
+test("lua/sharelist.lua parses and decides exactly like src/share.ts", { skip }, async () => {
   const dir = await tempDir();
   const out = join(dir, "out.txt");
   const lines: string[] = [
-    `local WL = dofile(${lstr(join(ROOT, "lua/watchlist.lua"))})`,
+    `local WL = dofile(${lstr(join(ROOT, "lua/sharelist.lua"))})`,
     `local f = assert(io.open(${lstr(out)}, "w"))`,
   ];
   FILES.forEach((content, i) => {
@@ -71,23 +71,23 @@ test("lua/watchlist.lua parses and decides exactly like src/watch.ts", { skip },
 
   const expected: string[] = [];
   FILES.forEach((content, i) => {
-    const ids = parseWatched(content);
+    const ids = parseShared(content);
     expected.push(`parse ${i} ${ids.join(",")}`);
     for (const [s, b] of ASKS) expected.push(`covers ${i} ${s} ${b} ${covers(ids, s, b)}`);
   });
   assert.deepEqual((await readFile(out, "utf8")).trimEnd().split("\n"), expected);
   // The TS side, spelled out: junk is ignored, both kinds parse.
-  assert.deepEqual(parseWatched(FILES[4]!), []);
-  assert.deepEqual(parseWatched(`${S1}\n${A}\njunk\n`), [S1, A]);
+  assert.deepEqual(parseShared(FILES[4]!), []);
+  assert.deepEqual(parseShared(`${S1}\n${A}\njunk\n`), [S1, A]);
 });
 
 /**
  * Runs bot-watch.lua's status handler against a stub `rex`: one status event per case (pane + session),
  * then fires the debounce timer and records whether the watcher sent the webhook.
  */
-async function watcherDecisions(watched: string, events: [string, string][], unwatchBeforeTimer = false) {
+async function watcherDecisions(shared: string, events: [string, string][], unshareBeforeTimer = false) {
   const dir = await tempDir();
-  await writeFile(join(dir, "watched"), watched);
+  await writeFile(join(dir, "shared"), shared);
   const out = join(dir, "out.txt");
   const harness = `
 local handlers, timers, sent = {}, {}, {}
@@ -113,7 +113,7 @@ local events = { ${events.map(([s, b]) => `{ ${lstr(s)}, ${lstr(b)} }`).join(", 
 for i, e in ipairs(events) do
   handlers["terminal.program_status_changed"]({ session_id = e[1], block_id = e[2] }, { id = "s" .. i, record = { state = "done", app = "t" } })
 end
-${unwatchBeforeTimer ? `do local w = assert(io.open(${lstr(join(dir, "watched"))}, "w")); w:write(""); w:close() end` : ""}
+${unshareBeforeTimer ? `do local w = assert(io.open(${lstr(join(dir, "shared"))}, "w")); w:write(""); w:close() end` : ""}
 for _, t in ipairs(timers) do if t.fn then t.fn() end end
 for _, b in ipairs(sent) do f:write(b, "\\n") end
 f:close()
@@ -122,21 +122,21 @@ f:close()
   return (await readFile(out, "utf8")).split("\n").filter(Boolean);
 }
 
-test("watcher: a watched session notifies for every pane in it, not for other sessions", { skip }, async () => {
+test("watcher: a shared session notifies for every pane in it, not for other sessions", { skip }, async () => {
   const sent = await watcherDecisions(`${S1}\n`, [[S1, A], [S1, B], [S2, "block:01a1a7e9-0000-7000-8000-0000000000c3"]]);
   assert.deepEqual(sent, [A, B]);
 });
 
-test("watcher: a watched pane notifies for that pane only, not its sibling in the same session", { skip }, async () => {
+test("watcher: a shared pane notifies for that pane only, not its sibling in the same session", { skip }, async () => {
   const sent = await watcherDecisions(`# pane only\n${A}  # note\n`, [[S1, A], [S1, B]]);
   assert.deepEqual(sent, [A]);
 });
 
-test("watcher: nothing watched (or only junk) notifies nothing", { skip }, async () => {
+test("watcher: nothing shared (or only junk) notifies nothing", { skip }, async () => {
   assert.deepEqual(await watcherDecisions("", [[S1, A], [S1, B]]), []);
   assert.deepEqual(await watcherDecisions(`junk\n#${A}\n`, [[S1, A], [S1, B]]), []);
 });
 
-test("watcher: a pane unwatched during the debounce is not notified", { skip }, async () => {
+test("watcher: a pane unshared during the debounce is not notified", { skip }, async () => {
   assert.deepEqual(await watcherDecisions(`${A}\n`, [[S1, A]], true), []);
 });

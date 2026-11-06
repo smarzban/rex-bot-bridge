@@ -127,7 +127,7 @@ test("url: prints only https://<dns>:8443/mcp; warns on stderr when Serve isn't 
 
 test("setup on a fresh install has no webhook warning; a configured one still shows ✅", async () => {
   const f = await fakeCtx(ok("{}"));
-  const flags = { yes: true, mode: "watched" as const, services: false, serve: false, skills: false, rexConfig: false };
+  const flags = { yes: true, mode: "shared" as const, services: false, serve: false, skills: false, rexConfig: false };
   await setup(f.ctx, flags, makePrompter(true));
   const out = f.out.join("\n");
   assert.ok(!/webhook not set/i.test(out), out);
@@ -137,7 +137,7 @@ test("setup on a fresh install has no webhook warning; a configured one still sh
 
 test("setup re-run with a configured webhook shows ✅ Webhook configured", async () => {
   const f = await fakeCtx(ok("{}"));
-  const flags = { yes: true, mode: "watched" as const, services: false, serve: false, skills: false, rexConfig: false };
+  const flags = { yes: true, mode: "shared" as const, services: false, serve: false, skills: false, rexConfig: false };
   await setup(f.ctx, flags, makePrompter(true));
   const s = await readSettings(f.ctx.paths.configFile);
   await writeSettings(f.ctx.paths.configFile, setKey(s, "webhook.url", "https://hooks.example.test/fake"));

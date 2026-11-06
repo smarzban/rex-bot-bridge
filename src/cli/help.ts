@@ -21,7 +21,7 @@ const EXIT_STD = "0 done · 1 failed (see the ❌ line and its fix) · 2 usage, 
 export const HELP: Record<string, CommandHelp> = {
   setup: {
     usage: [
-      "rex-grokbot setup [--yes] [--mode watched|full] [--no-rex-config] [--no-services]",
+      "rex-grokbot setup [--yes] [--mode shared|all] [--no-rex-config] [--no-services]",
       "    [--no-serve] [--no-skills]",
       "rex-grokbot setup rex | services | serve | skill [--yes]",
       "rex-grokbot setup webhook [--url URL] [--key-file FILE|-] [--header NAME] [--yes] [--no-test]",
@@ -47,7 +47,7 @@ export const HELP: Record<string, CommandHelp> = {
         "Options",
         [
           ["--yes, -y", "don't ask: use defaults (never replaces another Tailscale Serve mapping)"],
-          ["--mode MODE", "watched (default: the bot drives only sessions you opt in) or full"],
+          ["--mode MODE", "shared (default: the bot drives only sessions and panes you share) or all"],
           ["--no-rex-config", "skip the Rex palette part"],
           ["--no-services", "skip the launchd services (run rex-grokbot serve / rex-grokbot watch yourself)"],
           ["--no-serve", "skip Tailscale Serve"],
@@ -63,7 +63,7 @@ export const HELP: Record<string, CommandHelp> = {
         ],
       ],
     ],
-    examples: ["rex-grokbot setup", "rex-grokbot setup --yes --mode watched", "rex-grokbot setup services", "rex-grokbot setup webhook"],
+    examples: ["rex-grokbot setup", "rex-grokbot setup --yes --mode shared", "rex-grokbot setup services", "rex-grokbot setup webhook"],
     exit: "0 done · 1 a part failed (see its ❌ line) or a check failed · 2 usage, nothing changed",
   },
   "setup webhook": {
@@ -125,7 +125,7 @@ export const HELP: Record<string, CommandHelp> = {
     summary: "remove the services, palette actions and skill",
     description:
       "Stop and remove the launchd services, the init.lua block and the agent skill. Keeps\n" +
-      "~/.config/rex-grokbot-bridge (token, config, watched list) unless --purge. Asks before removing the\n" +
+      "~/.config/rex-grokbot-bridge (token, config, shared list) unless --purge. Asks before removing the\n" +
       "Tailscale Serve mapping on our port, and only ever removes our own.",
     sections: [
       [
@@ -154,7 +154,7 @@ export const HELP: Record<string, CommandHelp> = {
       ],
       ["Options", [["--show", "with get: print webhook.url / webhook.key instead of (set)"]]],
     ],
-    examples: ["rex-grokbot config get mode", "rex-grokbot config set mode full", "rex-grokbot config set webhook.key - < key.txt"],
+    examples: ["rex-grokbot config get mode", "rex-grokbot config set mode all", "rex-grokbot config set webhook.key - < key.txt"],
     exit: "0 done · 1 invalid value · 2 usage",
   },
   url: {
@@ -182,16 +182,15 @@ export const HELP: Record<string, CommandHelp> = {
     examples: ["rex-grokbot token | pbcopy", "rex-grokbot token --rotate | pbcopy"],
     exit: "0 printed · 1 no token yet (run rex-grokbot setup) · 2 usage",
   },
-  watch: {
-    usage: ["rex-grokbot watch add <session|pane>", "rex-grokbot watch remove <session|pane>", "rex-grokbot watch list", "rex-grokbot watch"],
-    summary: "opt a Rex session or a single pane in or out of the bot; bare: run the watcher",
+  share: {
+    usage: ["rex-grokbot share add <session|pane>", "rex-grokbot share remove <session|pane>", "rex-grokbot share list"],
+    summary: "share a Rex session or a single pane with the bot, or stop sharing it",
     description:
-      "The bot is notified about, and in watched mode can read and drive, only what is on this list. A\n" +
-      "session covers every pane in it; a pane covers only that pane (session-level actions such as\n" +
-      "closing the session or spawning into it need the session watched). `rex-grokbot say` sends only\n" +
-      "from a pane on the list. You can also toggle from Rex's palette: Bot: Watch / Unwatch This Session\n" +
-      "or Bot: Watch / Unwatch This Pane. Bare `rex-grokbot watch` runs the status watcher (the\n" +
-      "com.rexgrokbotbridge.watch service runs it for you).",
+      "The bot is notified about, and in shared mode can read and drive, only what is shared with it. A\n" +
+      "shared session covers every pane in it; a shared pane covers only that pane (session-level\n" +
+      "actions such as closing the session or spawning into it need the session shared). `rex-grokbot\n" +
+      "say` sends only from a shared pane. You can also toggle from Rex's palette: Bot: Share / Unshare\n" +
+      "This Session or Bot: Share / Unshare This Pane.",
     sections: [
       [
         "Arguments",
@@ -202,8 +201,18 @@ export const HELP: Record<string, CommandHelp> = {
       ],
       ["Output", [["list", "one line per entry: kind (session|pane), id, label when Rex can tell it"]]],
     ],
-    examples: ["rex-grokbot watch add \"$REX_SESSION\"", "rex-grokbot watch add \"$REX_BLOCK\"", "rex-grokbot watch list"],
+    examples: ["rex-grokbot share add \"$REX_SESSION\"", "rex-grokbot share add \"$REX_BLOCK\"", "rex-grokbot share list"],
     exit: "0 done (also when already on / off the list) · 2 usage",
+  },
+  watch: {
+    usage: ["rex-grokbot watch"],
+    summary: "run the status watcher (Rex status changes → webhook)",
+    description:
+      "Run lua/bot-watch.lua under rex do: it posts done / blocked / error status changes of shared panes\n" +
+      "(and panes in shared sessions) to the webhook. The com.rexgrokbotbridge.watch service runs it for you.",
+    sections: [],
+    examples: ["rex-grokbot watch"],
+    exit: "runs until stopped · 1 rex or the build missing · 2 usage",
   },
   say: {
     usage: ['rex-grokbot say "message"'],
@@ -211,9 +220,9 @@ export const HELP: Record<string, CommandHelp> = {
     description:
       "POST an agent_message event (text, REX_SESSION, REX_BLOCK, cwd) to the webhook. Everything after\n" +
       "`say` is the message. Sent only when this pane (REX_BLOCK) or its session (REX_SESSION) is on the\n" +
-      "watch list; outside Rex or from an unwatched pane it is not sent. Never fails the caller: exits 0\n" +
+      "share list; outside Rex or from an unshared pane it is not sent. Never fails the caller: exits 0\n" +
       "even when it isn't sent or delivered.",
-    sections: [["Output", [["stderr", "rex-grokbot: sent, or why it wasn't (not in Rex, pane not watched, no webhook)"]]]],
+    sections: [["Output", [["stderr", "rex-grokbot: sent, or why it wasn't (not in Rex, pane not shared, no webhook)"]]]],
     examples: ['rex-grokbot say "Tests pass; PR is up for review"'],
     exit: "0 always: sent or not (see stderr), also for an empty message",
   },
@@ -263,7 +272,7 @@ const GROUPS: [string, [string, string][]][] = [
   ],
   ["Check", [["doctor", HELP.doctor!.summary]]],
   ["Settings", [["config", HELP.config!.summary]]],
-  ["Watch list", [["watch", "add|remove <session|pane>, list: which sessions and panes the bot may drive"]]],
+  ["Sharing", [["share", "add|remove <session|pane>, list: which sessions and panes the bot may see and drive"]]],
   [
     "For agents",
     [

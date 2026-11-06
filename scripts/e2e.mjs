@@ -11,10 +11,10 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 const base = process.argv[2] || "http://127.0.0.1:7400";
 const tokenFile = process.env.REX_BRIDGE_TOKEN_FILE || join(homedir(), ".config/rex-grokbot-bridge/token");
 const token = readFileSync(tokenFile, "utf8").trim();
-const watchFile = join(process.env.REX_GROKBOT_DIR || join(homedir(), ".config/rex-grokbot-bridge"), "watched");
-const readWatch = () => {
+const sharedFile = join(process.env.REX_GROKBOT_DIR || join(homedir(), ".config/rex-grokbot-bridge"), "shared");
+const readShared = () => {
   try {
-    return readFileSync(watchFile, "utf8");
+    return readFileSync(sharedFile, "utf8");
   } catch {
     return null;
   }
@@ -69,7 +69,7 @@ const waitFor = async (block, needle, tries = 20) => {
 
 log("bridge_status", await callTool("bridge_status"));
 
-const watchBefore = readWatch();
+const sharedBefore = readShared();
 let session;
 try {
   // b. spawn shell in a new session, send, read
@@ -78,7 +78,7 @@ try {
     cwd: "/tmp",
     new_session_label: "bridge-e2e",
     label: "e2e-shell",
-    watch: false,
+    share: false,
   });
   session = spawned.session_id;
   const block = spawned.block_id;
@@ -110,7 +110,7 @@ try {
     session_id: session,
     label: "e2e-tab",
     command: ["sh", "-c", "echo tab-ok; exec sleep 300"],
-    watch: false,
+    share: false,
   });
   log("spawn_agent custom (new tab in bridge-e2e)", tab);
   const tabPane = await waitFor(tab.block_id, "tab-ok");
@@ -120,13 +120,13 @@ try {
   check(!panesLeft.includes(tab.block_id) && panesLeft.includes(block), "close_pane closed only the tab");
 
   // d. watch round-trip
-  log("watch_session", await callTool("watch_session", { session_id: session }));
-  const lw = await callTool("list_watched");
-  log("list_watched", lw);
-  check(lw.watched.includes(session), "list_watched includes bridge-e2e");
-  log("unwatch_session", await callTool("unwatch_session", { session_id: session }));
-  check(!(await callTool("list_watched")).watched.includes(session), "unwatched");
-  check(readWatch() === watchBefore, "real watch file is byte-identical to before");
+  log("share_session", await callTool("share_session", { session_id: session }));
+  const lw = await callTool("list_shared");
+  log("list_shared", lw);
+  check(lw.sessions.includes(session), "list_shared includes bridge-e2e");
+  log("unshare_session", await callTool("unshare_session", { session_id: session }));
+  check(!(await callTool("list_shared")).sessions.includes(session), "unshared");
+  check(readShared() === sharedBefore, "real shared file is byte-identical to before");
 } finally {
   // e. cleanup
   if (session) {
@@ -135,7 +135,7 @@ try {
     check(!after.sessions.some((s) => s.session_id === session), "bridge-e2e is gone");
     log("sessions remaining", after.sessions.map((s) => s.session_label).join(", "));
   }
-  check(readWatch() === watchBefore, "real watch file unchanged at end");
+  check(readShared() === sharedBefore, "real shared file unchanged at end");
   await client.close();
 }
 console.log(`\n${failures ? `${failures} FAILED` : "ALL PASSED"}`);

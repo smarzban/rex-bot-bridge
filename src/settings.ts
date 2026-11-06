@@ -1,8 +1,8 @@
 import { chmod, mkdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import { atomicWrite } from "./watch.js";
+import { atomicWrite } from "./share.js";
 
-export const MODES = ["watched", "full"] as const;
+export const MODES = ["shared", "all"] as const;
 export type Mode = (typeof MODES)[number];
 
 /** ~/.config/rex-grokbot-bridge/config.json */
@@ -18,7 +18,7 @@ export interface Settings {
 }
 
 export const DEFAULTS: Settings = {
-  mode: "watched",
+  mode: "shared",
   host: "127.0.0.1",
   port: 7400,
   servePort: 8443,

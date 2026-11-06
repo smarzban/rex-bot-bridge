@@ -1,5 +1,5 @@
--- watchlist.lua: the bot-watch opt-in list, shared by bot-watch.lua (the watcher) and
--- rex-grokbot-actions.lua (the palette). Must agree with src/watch.ts.
+-- sharelist.lua: what is shared with the bot, read by bot-watch.lua (the watcher) and
+-- rex-grokbot-actions.lua (the palette). Must agree with src/share.ts.
 --
 -- One entry per line, `#` comments allowed. The entry is the first token before whitespace or `#`:
 --   session:<uuid>  every pane in that session

@@ -44,7 +44,7 @@ async function drive(mode: "setup" | "webhook", steps: [string, string][], home?
 }
 
 const count = (hay: string, needle: string) => hay.split(needle).length - 1;
-const MODE: [string, string] = ["Mode (watched/full)", "\r"];
+const MODE: [string, string] = ["Mode (shared/all)", "\r"];
 
 async function sink(status: number) {
   const server = createServer((req, res) => {
@@ -130,13 +130,13 @@ test("T428 pty: Ctrl-C at the hidden key prompt exits 130 and leaves echo on", {
 
 test("T428 pty: three bad mode answers warn, use the default, and setup still writes config.json", { skip }, async () => {
   const r = await drive("setup", [
-    ["Mode (watched/full)", "nope\r"],
-    ["Mode (watched/full)", "nah\r"],
-    ["Mode (watched/full)", "never\r"],
+    ["Mode (shared/all)", "nope\r"],
+    ["Mode (shared/all)", "nah\r"],
+    ["Mode (shared/all)", "never\r"],
   ]);
   assert.equal(r.error, null, r.output);
   assert.equal(r.code, 0, r.output);
   assert.equal(count(r.output, "Please answer one of"), 2);
-  assert.match(r.output, /No valid answer after 3 tries; using watched/);
-  assert.equal((await readSettings(resolvePaths({ HOME: r.home }).configFile)).mode, "watched");
+  assert.match(r.output, /No valid answer after 3 tries; using shared/);
+  assert.equal((await readSettings(resolvePaths({ HOME: r.home }).configFile)).mode, "shared");
 });

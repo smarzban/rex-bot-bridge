@@ -80,14 +80,14 @@ export async function runDoctor(ctx: Ctx, opts: { testWebhook: boolean }): Promi
 
   // State files must stay private (mode 600).
   const loose: string[] = [];
-  for (const f of [paths.watchedFile, paths.heartbeatFile, paths.tokenFile, paths.configFile]) {
+  for (const f of [paths.sharedFile, paths.heartbeatFile, paths.tokenFile, paths.configFile]) {
     const st = await stat(f).catch(() => null);
     if (st && (st.mode & 0o777) !== 0o600) loose.push(`${f} (${(st.mode & 0o777).toString(8)})`);
   }
   if (loose.length) {
     add("file_modes", "warn", `not mode 600: ${loose.join(", ")}`, `chmod 600 ${loose.map((l) => `'${l.replace(/ \(\d+\)$/, "")}'`).join(" ")}`);
   } else add("file_modes", "ok", "state files are mode 600");
-  add("mode", "ok", `mode ${s.mode}${s.mode === "full" ? " (the bot can drive every session)" : " (only watched sessions and panes)"}`);
+  add("mode", "ok", `mode ${s.mode}${s.mode === "all" ? " (the bot can drive every session)" : " (only shared sessions and panes)"}`);
 
   // init.lua
   const blk = await inspectBlock(paths.rexInitLua);

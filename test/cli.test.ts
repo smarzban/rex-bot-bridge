@@ -15,7 +15,7 @@ test("resolvePaths: state under ~/.config/rex-grokbot-bridge, init.lua via REX_C
   const p = resolvePaths({ HOME: "/h" });
   assert.equal(p.stateDir, "/h/.config/rex-grokbot-bridge");
   assert.equal(p.tokenFile, "/h/.config/rex-grokbot-bridge/token");
-  assert.equal(p.watchedFile, "/h/.config/rex-grokbot-bridge/watched");
+  assert.equal(p.sharedFile, "/h/.config/rex-grokbot-bridge/shared");
   assert.equal(p.heartbeatFile, "/h/.config/rex-grokbot-bridge/heartbeat");
   assert.equal(p.configFile, "/h/.config/rex-grokbot-bridge/config.json");
   assert.equal(p.logsDir, "/h/Library/Logs/rex-grokbot-bridge");
@@ -23,25 +23,25 @@ test("resolvePaths: state under ~/.config/rex-grokbot-bridge, init.lua via REX_C
   assert.equal(p.rexInitLua, "/h/.config/rex/init.lua");
   assert.equal(resolvePaths({ HOME: "/h", XDG_CONFIG_HOME: "/x" }).rexInitLua, "/x/rex/init.lua");
   assert.equal(resolvePaths({ HOME: "/h", XDG_CONFIG_HOME: "/x", REX_CONFIG: "/r.lua" }).rexInitLua, "/r.lua");
-  assert.equal(resolvePaths({ HOME: "/h", REX_GROKBOT_DIR: "/s" }).watchedFile, "/s/watched");
+  assert.equal(resolvePaths({ HOME: "/h", REX_GROKBOT_DIR: "/s" }).sharedFile, "/s/shared");
 });
 
 test("loadConfig: defaults, config.json, then env overrides; mode re-read per call", async () => {
   const home = await tempDir();
   const c = await loadConfig({ HOME: home });
-  assert.deepEqual([c.host, c.port, c.rexBin, await c.getMode()], ["127.0.0.1", 7400, "rex", "watched"]);
+  assert.deepEqual([c.host, c.port, c.rexBin, await c.getMode()], ["127.0.0.1", 7400, "rex", "shared"]);
   // Generic HOST/PORT are ignored.
   const g = await loadConfig({ HOME: home, HOST: "0.0.0.0", PORT: "80" });
   assert.deepEqual([g.host, g.port], ["127.0.0.1", 7400]);
 
   await mkdir(join(home, ".config/rex-grokbot-bridge"), { recursive: true });
   const cfgFile = join(home, ".config/rex-grokbot-bridge/config.json");
-  await writeFile(cfgFile, JSON.stringify({ port: 7411, mode: "full" }));
+  await writeFile(cfgFile, JSON.stringify({ port: 7411, mode: "all" }));
   const f = await loadConfig({ HOME: home });
   assert.equal(f.port, 7411);
-  assert.equal(await f.getMode(), "full");
-  await writeFile(cfgFile, JSON.stringify({ port: 7411, mode: "watched" }));
-  assert.equal(await f.getMode(), "watched", "mode is read per call");
+  assert.equal(await f.getMode(), "all");
+  await writeFile(cfgFile, JSON.stringify({ port: 7411, mode: "shared" }));
+  assert.equal(await f.getMode(), "shared", "mode is read per call");
 
   const e = await loadConfig({ HOME: home, REX_BRIDGE_HOST: "100.64.0.1", REX_BRIDGE_PORT: "8123", REX_BIN: "/opt/rex" });
   assert.deepEqual([e.host, e.port, e.rexBin], ["100.64.0.1", 8123, "/opt/rex"]);
@@ -102,35 +102,35 @@ test("config set/get: secrets hidden unless --show, config.json is 600, stdin va
   assert.ok(!got.stdout.includes(url));
   assert.match(got.stdout, /hidden/);
   assert.equal((await cli(rexBotCli, ["config", "get", "webhook.key", "--show"], env)).stdout, "sekrit-key-xyz\n");
-  assert.equal((await cli(rexBotCli, ["config", "get", "mode"], env)).stdout, "watched\n");
+  assert.equal((await cli(rexBotCli, ["config", "get", "mode"], env)).stdout, "shared\n");
   assert.equal((await cli(rexBotCli, ["config", "set", "mode", "bogus"], env)).code, 1);
   const cfg = join(home, ".config/rex-grokbot-bridge/config.json");
   assert.equal((await stat(cfg)).mode & 0o777, 0o600);
   assert.equal(JSON.parse(await readFile(cfg, "utf8")).webhook.key, "sekrit-key-xyz");
 });
 
-test("watch add/remove/list validates ids and edits the watched file", async () => {
+test("watch add/remove/list validates ids and edits the shared file", async () => {
   const home = await tempDir();
-  // No rex binary: `watch list` shows no labels and never reaches a Rex server.
+  // No rex binary: `share list` shows no labels and never reaches a Rex server.
   const env = { HOME: home, REX_BIN: join(home, "no-rex") };
   const id = "session:01a1a7e9-0000-7000-8000-000000000001";
   const pane = "block:01a1a7e9-0000-7000-8000-0000000000b1";
-  assert.equal((await cli(rexBotCli, ["watch", "add", "nope"], env)).code, 2);
-  assert.equal((await cli(rexBotCli, ["watch", "add", "window:01a1a7e9-0000"], env)).code, 2);
-  assert.equal((await cli(rexBotCli, ["watch", "add", id], env)).stdout, `watching session ${id}\n`);
-  assert.equal((await cli(rexBotCli, ["watch", "add", id], env)).stdout, `already watching session ${id}\n`);
-  assert.equal((await cli(rexBotCli, ["watch", "add", pane], env)).stdout, `watching pane ${pane}\n`);
-  assert.equal((await cli(rexBotCli, ["watch", "list"], env)).stdout, `session ${id}\npane    ${pane}\n`);
-  assert.equal((await cli(rexBotCli, ["watch", "remove", id], env)).stdout, `no longer watching session ${id}\n`);
-  assert.equal((await cli(rexBotCli, ["watch", "remove", pane], env)).stdout, `no longer watching pane ${pane}\n`);
-  assert.equal((await cli(rexBotCli, ["watch", "list"], env)).stdout, "");
+  assert.equal((await cli(rexBotCli, ["share", "add", "nope"], env)).code, 2);
+  assert.equal((await cli(rexBotCli, ["share", "add", "window:01a1a7e9-0000"], env)).code, 2);
+  assert.equal((await cli(rexBotCli, ["share", "add", id], env)).stdout, `sharing session ${id}\n`);
+  assert.equal((await cli(rexBotCli, ["share", "add", id], env)).stdout, `already sharing session ${id}\n`);
+  assert.equal((await cli(rexBotCli, ["share", "add", pane], env)).stdout, `sharing pane ${pane}\n`);
+  assert.equal((await cli(rexBotCli, ["share", "list"], env)).stdout, `session ${id}\npane    ${pane}\n`);
+  assert.equal((await cli(rexBotCli, ["share", "remove", id], env)).stdout, `no longer sharing session ${id}\n`);
+  assert.equal((await cli(rexBotCli, ["share", "remove", pane], env)).stdout, `no longer sharing pane ${pane}\n`);
+  assert.equal((await cli(rexBotCli, ["share", "list"], env)).stdout, "");
 });
 
 test("say exits 0 with a clear message when no webhook is configured", async () => {
   const home = await tempDir();
   const sid = "session:01a1a7e9-0000-7000-8000-000000000001";
   await mkdir(join(home, ".config/rex-grokbot-bridge"), { recursive: true });
-  await writeFile(join(home, ".config/rex-grokbot-bridge/watched"), `${sid}\n`);
+  await writeFile(join(home, ".config/rex-grokbot-bridge/shared"), `${sid}\n`);
   const r = await cli(rexBotCli, ["say", "hello"], { HOME: home, REX_SESSION: sid, REX_BLOCK: "block:01a1a7e9-0000-7000-8000-0000000000b1" });
   assert.equal(r.code, 0);
   assert.match(r.stderr, /no webhook configured/);
@@ -167,4 +167,13 @@ test("CLI subprocesses get a scratch env: inherited REX_*/XDG/token overrides ne
       else process.env[k] = saved[k];
     }
   }
+});
+
+test("T435: `watch` only runs the watcher; sharing is `share add|remove|list` (no alias)", async () => {
+  const home = await tempDir();
+  const env = { HOME: home, REX_BIN: join(home, "no-rex") };
+  const r = await cli(rexBotCli, ["watch", "add", "session:01a1a7e9-0000-7000-8000-000000000001"], env);
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /rex-grokbot share add\|remove\|list/);
+  assert.equal((await cli(rexBotCli, ["share", "list"], env)).code, 0);
 });

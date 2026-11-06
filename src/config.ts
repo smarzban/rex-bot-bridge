@@ -7,7 +7,7 @@ export interface Config {
   port: number;
   paths: Paths;
   tokenFile: string;
-  watchedFile: string;
+  sharedFile: string;
   heartbeatFile: string;
   auditLog: string;
   rexBin: string;
@@ -25,15 +25,15 @@ export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<
   const paths = resolvePaths(env);
   const s = await readSettings(paths.configFile);
   const envMode = env.REX_BRIDGE_MODE;
-  if (envMode && envMode !== "watched" && envMode !== "full") {
-    throw new Error(`REX_BRIDGE_MODE must be watched or full, got ${envMode}`);
+  if (envMode && envMode !== "shared" && envMode !== "all") {
+    throw new Error(`REX_BRIDGE_MODE must be shared or all, got ${envMode}`);
   }
   return {
     host: env.REX_BRIDGE_HOST || s.host,
     port: env.REX_BRIDGE_PORT ? parsePort(env.REX_BRIDGE_PORT, "REX_BRIDGE_PORT") : s.port,
     paths,
     tokenFile: paths.tokenFile,
-    watchedFile: paths.watchedFile,
+    sharedFile: paths.sharedFile,
     heartbeatFile: paths.heartbeatFile,
     auditLog: paths.auditLog,
     rexBin: env.REX_BIN || "rex",

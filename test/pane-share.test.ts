@@ -1,4 +1,4 @@
-// T435: the watch list holds sessions and panes. Gating in watched mode, `say` gating, and parsing.
+// T435: the share list holds sessions and panes. Gating in shared mode, `say` gating, and parsing.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
@@ -8,12 +8,12 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { TOOL_NAMES } from "../src/tools.js";
-import { covers, entryKind, parseWatched } from "../src/watch.js";
+import { covers, entryKind, parseShared } from "../src/share.js";
 import { B1, B2, FakeRex, S1, call, childEnv, connect, startBridge, tempDir } from "./helpers.js";
 
 type Tool = (typeof TOOL_NAMES)[number];
 type State = "session" | "pane" | "sibling" | "nothing";
-/** What is on the watch list. The target is always pane B1 in session S1; B2 is B1's sibling in S1. */
+/** What is on the share list. The target is always pane B1 in session S1; B2 is B1's sibling in S1. */
 const STATES: Record<State, string[]> = { session: [S1], pane: [B1], sibling: [B2], nothing: [] };
 
 /** Block-scoped: the pane or its session. Session-scoped: the session only. */
@@ -29,13 +29,13 @@ const MATRIX: { tool: Tool; args: Record<string, unknown>; allowed: Record<State
   { tool: "wait_for_status", args: { block_id: B1, timeout_s: 1 }, allowed: BLOCK, scope: "pane" },
   { tool: "close_pane", args: { block_id: B1 }, allowed: BLOCK, scope: "pane" },
   { tool: "close_session", args: { session_id: S1 }, allowed: SESSION, scope: "session" },
-  { tool: "spawn_agent", args: { agent: "shell", cwd: "/tmp", session_id: S1, watch: false }, allowed: SESSION, scope: "session" },
-  { tool: "watch_session", args: { session_id: S1 }, allowed: NEVER, scope: "bot-watch" },
-  { tool: "watch_pane", args: { block_id: B1 }, allowed: NEVER, scope: "bot-watch" },
-  { tool: "unwatch_session", args: { session_id: S1 }, allowed: ALWAYS, scope: "none" },
-  { tool: "unwatch_pane", args: { block_id: B1 }, allowed: ALWAYS, scope: "none" },
+  { tool: "spawn_agent", args: { agent: "shell", cwd: "/tmp", session_id: S1, share: false }, allowed: SESSION, scope: "session" },
+  { tool: "share_session", args: { session_id: S1 }, allowed: NEVER, scope: "bot-watch" },
+  { tool: "share_pane", args: { block_id: B1 }, allowed: NEVER, scope: "bot-watch" },
+  { tool: "unshare_session", args: { session_id: S1 }, allowed: ALWAYS, scope: "none" },
+  { tool: "unshare_pane", args: { block_id: B1 }, allowed: ALWAYS, scope: "none" },
   { tool: "list_agents", args: {}, allowed: ALWAYS, scope: "none" },
-  { tool: "list_watched", args: {}, allowed: ALWAYS, scope: "none" },
+  { tool: "list_shared", args: {}, allowed: ALWAYS, scope: "none" },
   { tool: "bridge_status", args: {}, allowed: ALWAYS, scope: "none" },
 ];
 
@@ -46,32 +46,32 @@ test("the gating matrix covers every tool", () => {
 for (const m of MATRIX) {
   for (const state of Object.keys(STATES) as State[]) {
     const expect = m.allowed[state] ? "allowed" : "refused";
-    test(`watched mode, ${state === "sibling" ? "only another pane in the session" : state === "pane" ? "only the pane" : state} watched: ${m.tool} ${expect}`, async () => {
+    test(`shared mode, ${state === "sibling" ? "only another pane in the session" : state === "pane" ? "only the pane" : state} shared: ${m.tool} ${expect}`, async () => {
       const fake = new FakeRex();
       fake.state = "done"; // wait_for_status settles at once
-      const b = await startBridge(fake, "watched", STATES[state]);
+      const b = await startBridge(fake, "shared", STATES[state]);
       try {
         const client = await connect(b.url);
         const r = await call(client, m.tool, m.args);
         await client.close();
         assert.equal(r.isError, !m.allowed[state], `${m.tool}: ${r.text}`);
         if (r.isError) {
-          assert.match(r.text, /"watched" mode/);
-          assert.match(r.text, /rex-grokbot watch add/);
+          assert.match(r.text, /isn't shared/);
+          assert.match(r.text, /rex-grokbot share add/);
           if (m.scope === "pane") {
-            assert.match(r.text, new RegExp(`pane ${B1} \\(session ${S1}\\) is not watched`));
-            assert.match(r.text, /Bot: Watch \/ Unwatch This Pane/);
+            assert.match(r.text, new RegExp(`pane ${B1} isn't shared with the bot \\(nor is its session ${S1}\\)`));
+            assert.match(r.text, /Bot: Share \/ Unshare This Pane/);
           }
           if (m.scope === "session") {
-            assert.match(r.text, new RegExp(`session ${S1} is not watched`));
-            assert.match(r.text, /A watched pane alone does not allow session-level actions/);
+            assert.match(r.text, new RegExp(`session ${S1} isn't shared with the bot`));
+            assert.match(r.text, /A shared pane alone does not allow session-level actions/);
           }
           if (m.scope === "bot-watch") {
-            const id = m.tool === "watch_pane" ? B1 : S1;
-            assert.match(r.text, /only the human adds/);
-            assert.ok(r.text.includes(`rex-grokbot watch add ${id}`), `names the real id: ${r.text}`);
+            const id = m.tool === "share_pane" ? B1 : S1;
+            assert.match(r.text, /only the person shares/);
+            assert.ok(r.text.includes(`rex-grokbot share add ${id}`), `names the real id: ${r.text}`);
             assert.ok(!r.text.includes("<block_id|session_id>"), r.text);
-            assert.match(r.text, m.tool === "watch_pane" ? /This Pane/ : /This Session/);
+            assert.match(r.text, m.tool === "share_pane" ? /This Pane/ : /This Session/);
           }
         }
       } finally {
@@ -80,10 +80,10 @@ for (const m of MATRIX) {
     });
   }
 
-  test(`full mode, nothing watched: ${m.tool} allowed`, async () => {
+  test(`all mode, nothing shared: ${m.tool} allowed`, async () => {
     const fake = new FakeRex();
     fake.state = "done";
-    const b = await startBridge(fake, "full", []);
+    const b = await startBridge(fake, "all", []);
     try {
       const client = await connect(b.url);
       const r = await call(client, m.tool, m.args);
@@ -95,9 +95,9 @@ for (const m of MATRIX) {
   });
 }
 
-test("watched mode, only the pane watched: refused session actions never reach rex", async () => {
+test("shared mode, only the pane shared: refused session actions never reach rex", async () => {
   const fake = new FakeRex();
-  const b = await startBridge(fake, "watched", [B1]);
+  const b = await startBridge(fake, "shared", [B1]);
   const client = await connect(b.url);
   await call(client, "close_session", { session_id: S1 });
   await call(client, "spawn_agent", { agent: "shell", cwd: "/tmp", session_id: S1 });
@@ -109,52 +109,52 @@ test("watched mode, only the pane watched: refused session actions never reach r
   await b.close();
 });
 
-test("list_agents marks a watched pane, list_watched and bridge_status report both kinds", async () => {
-  const b = await startBridge(new FakeRex(), "watched", [B1]);
+test("list_agents marks a shared pane, list_shared and bridge_status report both kinds", async () => {
+  const b = await startBridge(new FakeRex(), "shared", [B1]);
   const client = await connect(b.url);
   const s1 = (await call(client, "list_agents", { session: S1 })).json.sessions[0];
-  assert.equal(s1.watched, false, "the session itself is not watched");
+  assert.equal(s1.shared, false, "the session itself is not shared");
   assert.deepEqual(
-    s1.panes.map((p: { block_id: string; watched: boolean }) => [p.block_id, p.watched]),
+    s1.panes.map((p: { block_id: string; shared: boolean }) => [p.block_id, p.shared]),
     [[B1, true], [B2, false]],
   );
-  assert.deepEqual((await call(client, "list_watched")).json.panes, [B1]);
-  assert.deepEqual((await call(client, "list_watched")).json.sessions, []);
+  assert.deepEqual((await call(client, "list_shared")).json.panes, [B1]);
+  assert.deepEqual((await call(client, "list_shared")).json.sessions, []);
   const st = (await call(client, "bridge_status")).json;
-  assert.equal(st.watched_sessions, 0);
-  assert.equal(st.watched_panes, 1);
+  assert.equal(st.shared_sessions, 0);
+  assert.equal(st.shared_panes, 1);
   await client.close();
   await b.close();
 });
 
-test("close_pane and close_session drop their entries from the watch list", async () => {
-  const b = await startBridge(new FakeRex(), "full", [S1, B1, B2]);
+test("close_pane and close_session drop their entries from the share list", async () => {
+  const b = await startBridge(new FakeRex(), "all", [S1, B1, B2]);
   const client = await connect(b.url);
-  assert.equal((await call(client, "close_pane", { block_id: B1 })).json.removed_from_watch_list, true);
-  assert.deepEqual(parseWatched(await readFile(b.watchPath, "utf8")), [S1, B2]);
-  assert.equal((await call(client, "close_session", { session_id: S1 })).json.removed_from_watch_list, true);
-  assert.deepEqual(parseWatched(await readFile(b.watchPath, "utf8")), []);
+  assert.equal((await call(client, "close_pane", { block_id: B1 })).json.removed_from_share_list, true);
+  assert.deepEqual(parseShared(await readFile(b.watchPath, "utf8")), [S1, B2]);
+  assert.equal((await call(client, "close_session", { session_id: S1 })).json.removed_from_share_list, true);
+  assert.deepEqual(parseShared(await readFile(b.watchPath, "utf8")), []);
   await client.close();
   await b.close();
 });
 
-test("watched mode: unwatch_pane works, watch_pane is refused and leaves the file alone", async () => {
-  const b = await startBridge(new FakeRex(), "watched", [B1]);
+test("shared mode: unshare_pane works, share_pane is refused and leaves the file alone", async () => {
+  const b = await startBridge(new FakeRex(), "shared", [B1]);
   const client = await connect(b.url);
   const before = await readFile(b.watchPath, "utf8");
-  assert.equal((await call(client, "watch_pane", { block_id: B2 })).isError, true);
+  assert.equal((await call(client, "share_pane", { block_id: B2 })).isError, true);
   assert.equal(await readFile(b.watchPath, "utf8"), before);
-  assert.equal((await call(client, "unwatch_pane", { block_id: B1 })).json.changed, true);
-  assert.deepEqual(parseWatched(await readFile(b.watchPath, "utf8")), []);
+  assert.equal((await call(client, "unshare_pane", { block_id: B1 })).json.changed, true);
+  assert.deepEqual(parseShared(await readFile(b.watchPath, "utf8")), []);
   await client.close();
   await b.close();
 });
 
 // ---------- parsing ----------
 
-test("watched file: sessions and panes parse, junk lines are ignored", () => {
+test("shared file: sessions and panes parse, junk lines are ignored", () => {
   const content = [
-    "# the bot-watch list",
+    "# the share list",
     "",
     `  ${S1}   # a whole session`,
     `${B1}# a pane, comment glued on`,
@@ -165,12 +165,12 @@ test("watched file: sessions and panes parse, junk lines are ignored", () => {
     `#${B2}`,
     `${B1}`,
   ].join("\n");
-  assert.deepEqual(parseWatched(content), [S1, B1]);
+  assert.deepEqual(parseShared(content), [S1, B1]);
   assert.equal(entryKind(S1), "session");
   assert.equal(entryKind(B1), "pane");
   assert.equal(entryKind("window:x"), null);
-  assert.equal(covers([S1], S1, B2), true, "a watched session covers every pane");
-  assert.equal(covers([B1], S1, B1), true, "a watched pane covers itself");
+  assert.equal(covers([S1], S1, B2), true, "a shared session covers every pane");
+  assert.equal(covers([B1], S1, B1), true, "a shared pane covers itself");
   assert.equal(covers([B1], S1, B2), false, "…but not its sibling");
   assert.equal(covers([B1], null, null), false);
 });
@@ -202,13 +202,13 @@ async function say(home: string, rexEnv: Record<string, string>, words = ["hello
 }
 
 const PANE_ENV = { REX_SESSION: S1, REX_BLOCK: B1 };
-const SAY_CASES: { name: string; watched: string; env: Record<string, string>; sent: boolean; stderr: RegExp }[] = [
-  { name: "the pane is watched", watched: `${B1}\n`, env: PANE_ENV, sent: true, stderr: /rex-grokbot: sent/ },
-  { name: "its session is watched", watched: `${S1}\n`, env: PANE_ENV, sent: true, stderr: /rex-grokbot: sent/ },
-  { name: "only another pane is watched", watched: `${B2}\n`, env: PANE_ENV, sent: false, stderr: /not sent: this pane isn't watched; the person can watch it from the Rex palette/ },
-  { name: "nothing is watched", watched: "", env: PANE_ENV, sent: false, stderr: /not sent: this pane isn't watched/ },
-  { name: "no REX env (outside Rex)", watched: `${S1}\n${B1}\n`, env: {}, sent: false, stderr: /not sent: not running inside a Rex pane/ },
-  { name: "REX_SESSION but no REX_BLOCK", watched: `${S1}\n`, env: { REX_SESSION: S1 }, sent: false, stderr: /not sent: not running inside a Rex pane/ },
+const SAY_CASES: { name: string; shared: string; env: Record<string, string>; sent: boolean; stderr: RegExp }[] = [
+  { name: "the pane is shared", shared: `${B1}\n`, env: PANE_ENV, sent: true, stderr: /rex-grokbot: sent/ },
+  { name: "its session is shared", shared: `${S1}\n`, env: PANE_ENV, sent: true, stderr: /rex-grokbot: sent/ },
+  { name: "only another pane is shared", shared: `${B2}\n`, env: PANE_ENV, sent: false, stderr: /not sent: this pane isn't shared with the bot; the person can share it from the Rex palette/ },
+  { name: "nothing is shared", shared: "", env: PANE_ENV, sent: false, stderr: /not sent: this pane isn't shared/ },
+  { name: "no REX env (outside Rex)", shared: `${S1}\n${B1}\n`, env: {}, sent: false, stderr: /not sent: not running inside a Rex pane/ },
+  { name: "REX_SESSION but no REX_BLOCK", shared: `${S1}\n`, env: { REX_SESSION: S1 }, sent: false, stderr: /not sent: not running inside a Rex pane/ },
 ];
 
 for (const c of SAY_CASES) {
@@ -219,7 +219,7 @@ for (const c of SAY_CASES) {
       const state = join(home, ".config/rex-grokbot-bridge");
       await mkdir(state, { recursive: true });
       await writeFile(join(state, "config.json"), JSON.stringify({ webhook: { url: s.url } }));
-      await writeFile(join(state, "watched"), c.watched);
+      await writeFile(join(state, "shared"), c.shared);
       const r = await say(home, c.env);
       assert.equal(r.code, 0, "say never fails the caller");
       assert.match(r.stderr, c.stderr);
@@ -246,7 +246,7 @@ for (const words of [[], [""], ["   "], ["  ", "\t"]]) {
       const state = join(home, ".config/rex-grokbot-bridge");
       await mkdir(state, { recursive: true });
       await writeFile(join(state, "config.json"), JSON.stringify({ webhook: { url: s.url } }));
-      await writeFile(join(state, "watched"), `${B1}\n`);
+      await writeFile(join(state, "shared"), `${B1}\n`);
       const r = await say(home, PANE_ENV, words);
       assert.equal(r.code, 0, "say never fails the caller");
       assert.match(r.stderr, /^rex-grokbot: not sent: the message is empty/);

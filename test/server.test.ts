@@ -113,13 +113,13 @@ test("tools/list returns every tool", async () => {
   await client.close();
 });
 
-test("list_agents reports panes, process name (argv0 not version), status and watched flag", async () => {
+test("list_agents reports panes, process name (argv0 not version), status and shared flag", async () => {
   const client = await connect(bridge.url);
   const r = await call(client, "list_agents");
   assert.equal(r.isError, false, r.text);
   const s = r.json.sessions[0];
   assert.equal(s.session_id, S1);
-  assert.equal(s.watched, true);
+  assert.equal(s.shared, true);
   assert.equal(s.panes[0].process.name, "claude");
   assert.equal(s.panes[0].window_label, "main");
   assert.equal(s.panes[0].status.state, "idle");
@@ -244,7 +244,7 @@ test("wait_for_status returns once a target state is reached, or times out", asy
   await client.close();
 });
 
-test("spawn_agent maps agents to argv and adds to watch list", async () => {
+test("spawn_agent maps agents to argv and adds to share list", async () => {
   const client = await connect(bridge.url);
   const r = await call(client, "spawn_agent", {
     agent: "claude",
@@ -259,7 +259,7 @@ test("spawn_agent maps agents to argv and adds to watch list", async () => {
   assert.ok(bridge.fake.calls.some((c) => c.args[1] === "rename" && c.args.at(-1) === "worker"));
   assert.match(await readFile(bridge.watchPath, "utf8"), new RegExp(r.json.session_id));
 
-  const shell = await call(client, "spawn_agent", { agent: "shell", cwd: "/tmp", session_id: S1, watch: false });
+  const shell = await call(client, "spawn_agent", { agent: "shell", cwd: "/tmp", session_id: S1, share: false });
   assert.equal(shell.isError, false, shell.text);
   const run = bridge.fake.callsOf("run").at(-1)!.args;
   assert.deepEqual(run.slice(0, 7), ["run", "-s", S1, "-c", "/tmp", "--focus=false", "--keep-open"]);
@@ -276,18 +276,18 @@ test("agentArgv mapping", () => {
   assert.throws(() => agentArgv("claude", "-p hack"));
 });
 
-test("watch/unwatch/list_watched round-trip preserves the file", async () => {
+test("watch/unshare/list_shared round-trip preserves the file", async () => {
   const client = await connect(bridge.url);
   const before = await readFile(bridge.watchPath, "utf8");
   const id = "session:01a1a7e9-0000-7000-8000-0000000000ee";
-  assert.equal((await call(client, "watch_session", { session_id: id })).json.changed, true);
-  assert.ok((await call(client, "list_watched")).json.sessions.includes(id));
+  assert.equal((await call(client, "share_session", { session_id: id })).json.changed, true);
+  assert.ok((await call(client, "list_shared")).json.sessions.includes(id));
   const pane = "block:01a1a7e9-0000-7000-8000-0000000000ef";
-  assert.equal((await call(client, "watch_pane", { block_id: pane })).json.changed, true);
-  const listed = (await call(client, "list_watched")).json;
+  assert.equal((await call(client, "share_pane", { block_id: pane })).json.changed, true);
+  const listed = (await call(client, "list_shared")).json;
   assert.ok(listed.panes.includes(pane) && !listed.sessions.includes(pane));
-  assert.equal((await call(client, "unwatch_pane", { block_id: pane })).json.changed, true);
-  assert.equal((await call(client, "unwatch_session", { session_id: id })).json.changed, true);
+  assert.equal((await call(client, "unshare_pane", { block_id: pane })).json.changed, true);
+  assert.equal((await call(client, "unshare_session", { session_id: id })).json.changed, true);
   assert.equal(await readFile(bridge.watchPath, "utf8"), before);
   await client.close();
 });
@@ -322,7 +322,7 @@ test("audit log records failed calls with ok=false and the error", async () => {
 test("audit log truncates array args (custom command argv)", async () => {
   const client = await connect(bridge.url);
   const command = ["sh", "-c", "z".repeat(1000), ...Array.from({ length: 30 }, (_, i) => `a${i}`)];
-  const r = await call(client, "spawn_agent", { agent: "custom", cwd: "/tmp", session_id: S1, command, watch: false });
+  const r = await call(client, "spawn_agent", { agent: "custom", cwd: "/tmp", session_id: S1, command, share: false });
   assert.equal(r.isError, false, r.text);
   await client.close();
   const last = JSON.parse((await readFile(bridge.auditPath, "utf8")).trim().split("\n").at(-1)!);
