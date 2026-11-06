@@ -22,10 +22,12 @@ macOS only. Both directions live in this one package; `rex-grokbot setup` instal
 
 | Mode | What the bot can do |
 |---|---|
-| `watched` (default) | List every session. Read, type into, press keys in, wait on, and close panes **only in sessions you opted in**. Spawn agents into a watched session or a new session (which is then watched). It cannot opt sessions in itself. |
+| `watched` (default) | List every session. Read, type into, press keys in, wait on, and close **only panes you opted in**: a whole session (every pane in it) or a single pane. Close a session or spawn agents into it only when the session itself is watched; spawn into a new session (which is then watched). It cannot opt anything in itself. |
 | `full` | All of the above in **every** Rex session. |
 
-Opt a session in from Rex's command palette (**Bot: Watch / Unwatch This Session**; an alert confirms it, and **Bot: List Watched Sessions** shows the list) or with `rex-grokbot watch add <session-id>` (inside the session, `rex-grokbot whoami` prints its id; `rex ls --json` lists every session's id and label; `rex-grokbot watch list` checks). Switch modes with `rex-grokbot config set mode watched|full` (takes effect on the next call, no restart).
+Opt in from Rex's command palette: **Bot: Watch / Unwatch This Session** (every pane in the session) or **Bot: Watch / Unwatch This Pane** (only the focused pane). An alert confirms it, and **Bot: List Watched** shows both kinds. Or use `rex-grokbot watch add <session-id|block-id>` (inside a pane, `rex-grokbot whoami` prints its `REX_SESSION` and `REX_BLOCK`; `rex ls --json` lists every session's id and label; `rex-grokbot watch list` checks).
+
+What you watch is also what notifies the bot: status pushes come only from watched panes and panes in watched sessions, and an agent's `rex-grokbot say` is sent only from those (elsewhere it prints "not sent" and exits 0). Seeing a session in `list_agents` (labels, short status) is not being notified about it. Switch modes with `rex-grokbot config set mode watched|full` (takes effect on the next call, no restart).
 
 Other protections:
 
@@ -39,7 +41,7 @@ Other protections:
 
 ## Prerequisites
 
-- macOS with **Node 22+** (`brew install node`)
+- macOS with **Node 22+ and npm** (`brew install node`; `install.sh` checks both)
 - **Rex**, running, with `rex` on your PATH (`command -v rex`)
 - **Tailscale**, logged in on this Mac, with **HTTPS certificates enabled for the tailnet** (admin console → DNS → MagicDNS + HTTPS)
 - **Grok Bot** desktop
@@ -120,15 +122,16 @@ Run `rex-grokbot --help`, or `rex-grokbot help <command>` / `rex-grokbot <comman
 
 | Tool | Args | Does |
 |---|---|---|
-| `list_agents` | `session?` | Sessions → panes: ids, labels, foreground process, program status (`state`, `kind`, `app`, `msg`), `watched` |
+| `list_agents` | `session?` | Sessions → panes: ids, labels, foreground process, program status (`state`, `kind`, `app`, `msg`), `watched` (session: on the list; pane: the pane or its session is) |
 | `read_pane` | `block_id`, `session_id?`, `lines=80` | Tail of the pane's screen and scrollback (untrusted text) |
 | `send_message` | `block_id`, `session_id?`, `text`, `submit=true`, `require_idle=false` | Pastes text, then Enter |
 | `send_keys` | `block_id`, `session_id?`, `keys[]` | e.g. `["escape"]`, `["ctrl+c"]`, `["1","enter"]` |
 | `spawn_agent` | `agent`, `cwd`, `prompt?`, `session_id?` \| `new_session_label?`, `label?`, `command?`, `watch=true` | New tab in a session, or a new session (`watch` applies in full mode; in watched mode only a new session is added) |
 | `wait_for_status` | `block_id`, `session_id?`, `states`, `timeout_s=120` | Polls program status |
-| `close_pane` / `close_session` | ids | Close a pane / kill a session |
-| `watch_session` / `unwatch_session` | `session_id` | Edit the opt-in list (`watch_session` only in full mode) |
-| `list_watched`, `bridge_status` | — | Watched ids; mode, Rex version, watcher heartbeat |
+| `close_pane` / `close_session` | ids | Close a pane / kill a session (and drop them from the opt-in list) |
+| `watch_session` / `unwatch_session` | `session_id` | Edit the opt-in list: a whole session (`watch_session` only in full mode) |
+| `watch_pane` / `unwatch_pane` | `block_id` | Edit the opt-in list: one pane (`watch_pane` only in full mode) |
+| `list_watched`, `bridge_status` | — | Watched sessions and panes; mode, Rex version, watcher heartbeat, watched counts |
 
 Program status comes from OSC 7501, which Claude Code and Pi report natively. For other programs `status` is `null`; use `process.name`.
 
@@ -136,7 +139,7 @@ Program status comes from OSC 7501, which Claude Code and Pi report natively. Fo
 
 | Path | What |
 |---|---|
-| `~/.config/rex-grokbot-bridge/` | `token`, `config.json`, `watched` (opt-in list), `heartbeat` |
+| `~/.config/rex-grokbot-bridge/` | `token`, `config.json`, `watched` (opt-in list: `session:…` and `block:…` lines), `heartbeat` |
 | `~/.config/rex/rex-grokbot-backups/` | `init.lua` backups (next to `init.lua`; kept by `uninstall --purge`) |
 | `~/Library/LaunchAgents/com.rexgrokbotbridge.{bridge,watch}.plist` | The services |
 | `~/Library/Logs/rex-grokbot-bridge/` | `bridge.log`, `watch.log`, `notify.log` |
@@ -150,8 +153,9 @@ Run `rex-grokbot doctor` first; every ❌ comes with a fix line.
 - **Grok Bot says "authorization failed" or tries to sign in:** the connector was saved as OAuth, or its URL isn't exactly what `rex-grokbot url` prints. Delete it and re-add it with the URL from `rex-grokbot url` (`…:8443/mcp`) and the static `Authorization: Bearer <token>` header ([guide](docs/grok-bot.md#if-something-breaks)).
 - **The bot gets HTTP 502:** Tailscale reached your Mac but the bridge is down. Check `launchctl print gui/$(id -u)/com.rexgrokbotbridge.bridge` and `~/Library/Logs/rex-grokbot-bridge/bridge.log`, then `launchctl kickstart -k gui/$(id -u)/com.rexgrokbotbridge.bridge` or `rex-grokbot setup services`.
 - **Doctor says the watcher heartbeat is old:** the watcher is down, so no status pushes. Check `watch.log` and `launchctl print gui/$(id -u)/com.rexgrokbotbridge.watch`.
-- **The routine never fires:** `rex-grokbot doctor --test-webhook` should report HTTP 200. Then check the session is watched (`rex-grokbot watch list`) and that its agent reports status (OSC 7501). `notify.log` shows every attempt's status code.
-- **"refused: the bridge is in watched mode":** opt the session in (palette or `rex-grokbot watch add`; see [Session opt-in](#security-model-in-plain-words)). Don't switch to `full` mode to fix this: it opens every session.
+- **The routine never fires:** `rex-grokbot doctor --test-webhook` should report HTTP 200. Then check the pane or its session is watched (`rex-grokbot watch list`) and that its agent reports status (OSC 7501). `notify.log` shows every attempt's status code.
+- **"refused: the bridge is in watched mode":** opt the pane or its session in (palette or `rex-grokbot watch add`; see [opt-in](#security-model-in-plain-words)). Closing a session or spawning into it needs the session itself watched, not just a pane.
+- **An agent's `rex-grokbot say` prints "not sent":** its pane isn't watched (nor its session), or it isn't running in Rex. Watch the pane or session. Don't switch to `full` mode to fix this: it opens every session.
 - **The palette actions are missing:** `rex config check`, then `rex config reload`.
 
 ## Uninstall
