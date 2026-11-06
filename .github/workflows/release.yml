@@ -1,0 +1,90 @@
+name: Release
+
+# Push a tag vX.Y.Z (on a commit already merged to main, with package.json at X.Y.Z and a CHANGELOG entry)
+# and this publishes rex-grokbot-bridge@X.Y.Z to npm and creates the GitHub Release.
+# npm auth is trusted publishing (OIDC): no npm token secret. One-time setup: CONTRIBUTING.md#releases.
+on:
+  push:
+    tags: ["v*"]
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the tag and origin/main, for the "on main" check
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Tag matches package.json and is on main
+        id: check
+        run: |
+          version=$(node scripts/release.mjs check "$GITHUB_REF_NAME" origin/main)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: CHANGELOG has this version
+        run: node scripts/release.mjs notes "${{ steps.check.outputs.version }}" > /dev/null
+
+      - run: npm ci --ignore-scripts
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
+
+  publish:
+    needs: verify
+    runs-on: macos-latest
+    permissions:
+      contents: write # create the GitHub Release
+      id-token: write # npm trusted publishing (OIDC)
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          # No cache in release builds.
+
+      # Trusted publishing needs npm >= 11.5.1 (and Node >= 22.14); Node 22 ships npm 10.
+      - run: npm install -g npm@11.21.2
+      - run: npm --version
+
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+
+      - name: Publish to npm (skipped when this version is already there)
+        run: |
+          name=$(node -p 'require("./package.json").name')
+          if [ "$(npm view "$name@$VERSION" version 2>/dev/null || true)" = "$VERSION" ]; then
+            echo "$name@$VERSION is already on npm; skipping publish."
+          else
+            # Provenance is automatic with trusted publishing; --provenance makes it explicit.
+            npm publish --provenance --access public
+          fi
+
+      - name: GitHub Release (skipped when it exists)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists; leaving it."
+          else
+            node scripts/release.mjs notes "$VERSION" > "$RUNNER_TEMP/notes.md"
+            gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"
+          fi
