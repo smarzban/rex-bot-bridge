@@ -209,8 +209,9 @@ async function notifyCmd(): Promise<number> {
 
 async function sayCmd(text: string): Promise<number> {
   if (!text) {
-    console.error('usage: rex-grokbot say "message"');
-    return 2;
+    // Like every other not-sent path: never fail the agent that called it.
+    console.error('rex-grokbot: not sent: the message is empty (usage: rex-grokbot say "message")');
+    return 0;
   }
   const ctx = makeCtx();
   // Only a watched pane (or a pane in a watched session) may message the bot.

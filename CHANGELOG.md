@@ -26,7 +26,8 @@ with the skill could message the bot with `rex-grokbot say` from an unwatched se
 - **Palette:** new **Bot: Watch / Unwatch This Pane** (the focused pane, same alert feedback); **Bot: List Watched
   Sessions** is now **Bot: List Watched** and shows both kinds.
 - **`rex-grokbot say`** sends only when `REX_BLOCK` or its `REX_SESSION` is watched. Otherwise (or outside Rex)
-  it prints one "not sent" line to stderr and exits 0. The agent skill says so.
+  it prints one "not sent" line to stderr and exits 0, as it now also does for an empty message (was exit 2).
+  The agent skill says so. A refused `watch_pane`/`watch_session` names the id the human should add.
 - **Grok Bot guide:** the connector is named `Rex`; the routine prompt handles `kind: auth` (tell the owner what
   is needed, never paste credentials), replies to every `doctor_test` (never a duplicate), is written as intent
   rather than tool names, and sends results to the owner in that chat; steps 2 and 3 share one

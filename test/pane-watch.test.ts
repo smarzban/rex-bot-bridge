@@ -66,7 +66,13 @@ for (const m of MATRIX) {
             assert.match(r.text, new RegExp(`session ${S1} is not watched`));
             assert.match(r.text, /A watched pane alone does not allow session-level actions/);
           }
-          if (m.scope === "bot-watch") assert.match(r.text, /only the human adds/);
+          if (m.scope === "bot-watch") {
+            const id = m.tool === "watch_pane" ? B1 : S1;
+            assert.match(r.text, /only the human adds/);
+            assert.ok(r.text.includes(`rex-grokbot watch add ${id}`), `names the real id: ${r.text}`);
+            assert.ok(!r.text.includes("<block_id|session_id>"), r.text);
+            assert.match(r.text, m.tool === "watch_pane" ? /This Pane/ : /This Session/);
+          }
         }
       } finally {
         await b.close();
@@ -188,8 +194,8 @@ async function sink() {
   return { got, url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/hook`, close: () => server.close() };
 }
 
-async function say(home: string, rexEnv: Record<string, string>) {
-  return run(process.execPath, ["--import", "tsx", CLI, "say", "hello", "bot"], { env: childEnv({ HOME: home, ...rexEnv }) }).then(
+async function say(home: string, rexEnv: Record<string, string>, words = ["hello", "bot"]) {
+  return run(process.execPath, ["--import", "tsx", CLI, "say", ...words], { env: childEnv({ HOME: home, ...rexEnv }) }).then(
     (r) => ({ ...r, code: 0 }),
     (e: { stdout: string; stderr: string; code: number }) => e,
   );
@@ -226,6 +232,26 @@ for (const c of SAY_CASES) {
         assert.equal(body.rex_block, B1);
         assert.equal(body.rex_session, S1);
       }
+    } finally {
+      s.close();
+    }
+  });
+}
+
+for (const words of [[], [""], ["   "], ["  ", "\t"]]) {
+  test(`say: empty/whitespace message ${JSON.stringify(words)} → not sent, exit 0`, async () => {
+    const s = await sink();
+    try {
+      const home = await tempDir();
+      const state = join(home, ".config/rex-grokbot-bridge");
+      await mkdir(state, { recursive: true });
+      await writeFile(join(state, "config.json"), JSON.stringify({ webhook: { url: s.url } }));
+      await writeFile(join(state, "watched"), `${B1}\n`);
+      const r = await say(home, PANE_ENV, words);
+      assert.equal(r.code, 0, "say never fails the caller");
+      assert.match(r.stderr, /^rex-grokbot: not sent: the message is empty/);
+      assert.equal(r.stderr.trim().split("\n").length, 1, "one stderr line");
+      assert.equal(s.got.length, 0);
     } finally {
       s.close();
     }

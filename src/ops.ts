@@ -318,18 +318,19 @@ export class Ops {
     return { session_id: sessionId, closed: true, removed_from_watch_list: unwatched };
   }
 
-  private async refuseBotWatch(tool: string, what: string): Promise<void> {
+  private async refuseBotWatch(tool: string, id: string): Promise<void> {
     if ((await this.mode()) === "watched") {
+      const pane = id.startsWith("block:");
       throw new BridgeError(
-        `${tool} refused: the bridge is in "watched" mode, where only the human adds ${what}. Ask the human to opt ` +
-          'it in (Rex command palette "Bot: Watch / Unwatch This Pane" or "Bot: Watch / Unwatch This Session", or ' +
-          "`rex-grokbot watch add <block_id|session_id>`).",
+        `${tool} refused: the bridge is in "watched" mode, where only the human adds ${pane ? "panes" : "sessions"}. ` +
+          `Ask the human to opt ${pane ? "pane" : "session"} ${id} in (Rex command palette ` +
+          `"Bot: Watch / Unwatch ${pane ? "This Pane" : "This Session"}", or \`rex-grokbot watch add ${id}\`).`,
       );
     }
   }
 
   async watchSession(sessionId: string) {
-    await this.refuseBotWatch("watch_session", "sessions");
+    await this.refuseBotWatch("watch_session", sessionId);
     const changed = await this.watch.add(sessionId);
     return { session_id: sessionId, watched: true, changed };
   }
@@ -340,7 +341,7 @@ export class Ops {
   }
 
   async watchPane(blockId: string) {
-    await this.refuseBotWatch("watch_pane", "panes");
+    await this.refuseBotWatch("watch_pane", blockId);
     const changed = await this.watch.add(blockId);
     return { block_id: blockId, watched: true, changed };
   }

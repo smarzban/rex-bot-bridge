@@ -215,7 +215,7 @@ export const HELP: Record<string, CommandHelp> = {
       "even when it isn't sent or delivered.",
     sections: [["Output", [["stderr", "rex-grokbot: sent, or why it wasn't (not in Rex, pane not watched, no webhook)"]]]],
     examples: ['rex-grokbot say "Tests pass; PR is up for review"'],
-    exit: "0 sent or not (see stderr) · 2 no message",
+    exit: "0 always: sent or not (see stderr), also for an empty message",
   },
   whoami: {
     usage: ["rex-grokbot whoami"],
