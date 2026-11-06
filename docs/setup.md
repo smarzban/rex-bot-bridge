@@ -21,9 +21,14 @@ Install globally, not with `npx`: the launchd services point at the installed fi
 curl -fsSL https://raw.githubusercontent.com/smarzban/rex-grokbot-bridge/main/install.sh | sh
 ```
 
-Read the script first if you like: <https://raw.githubusercontent.com/smarzban/rex-grokbot-bridge/main/install.sh>. It checks macOS, Node and npm, installs the `rex-grokbot` CLI with npm (from the npm registry, or from GitHub if the package isn't published there; never sudo, never installs Node), and offers to run `rex-grokbot setup`.
+Read the script first if you like: <https://raw.githubusercontent.com/smarzban/rex-grokbot-bridge/main/install.sh>. It checks macOS, Node and npm, installs the **latest release** of the `rex-grokbot` CLI with npm (from the npm registry, or, while no release is published there, the latest [GitHub Release](https://github.com/smarzban/rex-grokbot-bridge/releases) built from its tag; never sudo, never installs Node), and offers to run `rex-grokbot setup`. It never installs the unreleased `main` branch unless you ask for it.
 
-Environment overrides: `REX_GROKBOT_SOURCE=npm|github` picks the source, `REX_GROKBOT_VERSION` an npm version or git ref.
+Environment overrides:
+
+- `REX_GROKBOT_SOURCE=npm|github` picks the source.
+- `REX_GROKBOT_VERSION` pins a version: an npm version (`0.7.3`) or a release tag (`v0.7.3`), e.g.
+  `curl -fsSL https://raw.githubusercontent.com/smarzban/rex-grokbot-bridge/main/install.sh | REX_GROKBOT_VERSION=v0.7.3 sh`
+- `REX_GROKBOT_SOURCE=github REX_GROKBOT_VERSION=main` installs the unreleased `main` branch (or any other git ref). Unsupported: use it only to try a fix before it's released.
 
 ### npm
 
@@ -31,6 +36,8 @@ Environment overrides: `REX_GROKBOT_SOURCE=npm|github` picks the source, `REX_GR
 npm i -g rex-grokbot-bridge
 rex-grokbot setup
 ```
+
+This installs the latest release; `npm i -g rex-grokbot-bridge@0.7.3` pins one.
 
 ### From source
 
@@ -85,7 +92,7 @@ With `--yes`, nothing on Tailscale Serve is overwritten.
 
 ## Upgrading
 
-Re-run the installer, or `npm i -g rex-grokbot-bridge`, then `rex-grokbot setup`. Setup reloads the Rex config so new palette actions load. If the Rex palette still doesn't show the **Bot:** actions, quit and reopen the Rex app (your sessions keep running).
+Re-run the installer, or `npm i -g rex-grokbot-bridge` (both install the latest release), then `rex-grokbot setup`. Setup reloads the Rex config so new palette actions load. If the Rex palette still doesn't show the **Bot:** actions, quit and reopen the Rex app (your sessions keep running).
 
 ## Uninstall
 
