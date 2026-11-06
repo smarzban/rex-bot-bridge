@@ -1,7 +1,7 @@
 # Contributing
 
 Thanks for helping. rex-grokbot-bridge is small: a Node 22 / TypeScript CLI and MCP server for macOS, plus a
-little Lua for Rex. Agent-facing project rules are in [AGENTS.md](AGENTS.md); this is the short version.
+little Lua for Rex. Agent-facing project rules are in [AGENTS.md](https://github.com/smarzban/rex-grokbot-bridge/blob/main/AGENTS.md); this is the short version.
 
 ## Dev setup
 

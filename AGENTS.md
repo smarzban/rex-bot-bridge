@@ -53,9 +53,8 @@ webhook. `rex-grokbot setup` installs both as launchd services. User docs: [READ
   relative links and anchors).
 - **Safety in dev:** don't touch a live install (the real `~/.config/rex-grokbot-bridge`, `init.lua`,
   launchd services, `tailscale serve`) or Rex sessions you didn't create. Use `e2e:sandbox`.
-- **Releases:** each release bumps `package.json` (`npm version X.Y.Z --no-git-tag-version`) and the
-  MCP server version in `src/tools.ts`, and adds
-  a dated entry at the top of [CHANGELOG.md](CHANGELOG.md). Release = merge the PR to `main`, then
+- **Releases:** each release bumps `package.json` (`npm version X.Y.Z --no-git-tag-version`; the CLI and
+  the MCP server read their version from it) and adds a dated entry at the top of [CHANGELOG.md](CHANGELOG.md). Release = merge the PR to `main`, then
   the owner runs `npm publish`. Never run `npm publish` or `npm login` as an agent.
 - **Flow:** branch from `main`, logical commits, PR against `main` with proof (tests, typecheck,
   build, e2e:sandbox where it applies). CI must be green.

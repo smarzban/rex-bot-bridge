@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { packageVersion } from "../version.js";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
@@ -254,11 +255,6 @@ async function sayCmd(text: string): Promise<number> {
   return 0;
 }
 
-/** The version in package.json (same relative path from src/cli and dist/cli). */
-export function packageVersion(): string {
-  const pkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as { version: string };
-  return pkg.version;
-}
 
 /** Reads --key-file: a path, or "-" for stdin. */
 async function readKeyFile(f: string): Promise<string> {

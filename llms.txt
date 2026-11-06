@@ -2,7 +2,7 @@
 
 > An MCP server and webhook bridge for macOS that lets Grok Bot, over Tailscale, see and drive the coding agents (Claude Code, Codex, Pi, Grok Build, shells) running in your Rex terminal, and get pinged when they finish or get stuck.
 
-Install with `npm i -g rex-grokbot-bridge` (or the curl installer), then run `rex-grokbot setup`. By default the bot drives only the Rex sessions and panes the user shares with it. The CLI is `rex-grokbot`; `rex-grokbot --help` and `rex-grokbot doctor` are the first things to run.
+Install with `npm i -g rex-grokbot-bridge` (or the curl installer), then run `rex-grokbot setup`. By default the bot drives only the Rex sessions and panes the user shares with it, plus new sessions it starts itself; spawning can run any command, so the bearer token must stay private. The CLI is `rex-grokbot`; `rex-grokbot --help` and `rex-grokbot doctor` are the first things to run.
 
 ## Docs
 

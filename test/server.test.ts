@@ -113,6 +113,13 @@ test("tools/list returns every tool", async () => {
   await client.close();
 });
 
+test("the MCP server reports package.json's version (no hard-coded copy to forget on release)", async () => {
+  const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
+  const client = await connect(bridge.url);
+  assert.deepEqual(client.getServerVersion(), { name: "rex-grokbot-bridge", version: pkg.version });
+  await client.close();
+});
+
 test("list_agents reports panes, process name (argv0 not version), status and shared flag", async () => {
   const client = await connect(bridge.url);
   const r = await call(client, "list_agents");

@@ -143,7 +143,7 @@ export const HELP: Record<string, CommandHelp> = {
   config: {
     usage: ["rex-grokbot config get <key> [--show]", "rex-grokbot config set <key> <value>"],
     summary: "read or change one setting in config.json",
-    description: "Read or change one setting in ~/.config/rex-grokbot-bridge/config.json. Mode changes apply on the\nbot's next call; port and host need the services restarted (rex-grokbot setup services);\nservePort (the tailnet HTTPS port, default 8443, not 443) needs rex-grokbot setup serve.",
+    description: "Read or change one setting in ~/.config/rex-grokbot-bridge/config.json. Mode changes apply on the\nbot's next call; port and host need the services restarted (rex-grokbot setup services), and a\nport change also rex-grokbot setup serve (it asks before replacing the old mapping);\nservePort (the tailnet HTTPS port, default 8443, not 443) needs rex-grokbot setup serve.",
     sections: [
       [
         "Arguments",

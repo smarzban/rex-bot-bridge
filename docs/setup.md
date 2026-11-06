@@ -81,7 +81,7 @@ With `--yes`, nothing on Tailscale Serve is overwritten.
 - It uses its own port, not a path on 443, because other apps on the Mac can serve OAuth metadata at the 443 origin's `/.well-known/`, and an MCP client that sees our 401 would find it and try to sign in there.
 - If another app already has `/` on port 8443, setup asks before replacing it (default no; `--yes` never replaces). If the port holds several paths or a TCP forward, it leaves it alone.
 - Either way you can pick another port with `rex-grokbot config set servePort <port>`, then `rex-grokbot setup serve`. 8443 is the default (10000 is the other common choice); 443 isn't allowed. Those are also Funnel's ports (443/8443/10000), but the bridge never enables Funnel.
-- The local port and host (`rex-grokbot config set port|host …`) need the services restarted: `rex-grokbot setup services`.
+- Changing where the bridge listens (`rex-grokbot config set port|host …`) needs the services restarted: `rex-grokbot setup services`. Tailscale Serve always forwards to `http://127.0.0.1:<port>`, so after a **port** change also run `rex-grokbot setup serve`: it finds the old mapping on the Serve port and asks before replacing it (answer yes; `--yes` never replaces it, so run it interactively). Until then the bot gets HTTP 502.
 
 ## Upgrading
 

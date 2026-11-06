@@ -8,7 +8,7 @@ An MCP server and webhook bridge for macOS that lets **Grok Bot**, over **Tailsc
 
 - **Bot → agents:** an MCP server the bot connects to. It lists sessions and panes, reads a pane's screen, types into it, presses keys, spawns new agents, waits for them, and closes them.
 - **Agents → bot:** a watcher POSTs to the bot's webhook when an agent's status turns `done`, `blocked` or `error`, and agents can message the bot with `rex-grokbot say "…"`.
-- **You choose what's shared:** by default the bot drives only the Rex sessions or panes you share with it, from Rex's command palette or the CLI.
+- **You choose what's shared:** by default the bot drives only the Rex sessions or panes you share with it (from Rex's command palette or the CLI), plus new sessions it starts itself.
 - **Tailnet only:** the bridge listens on `127.0.0.1` and is reachable only through Tailscale Serve on your tailnet, never the public internet.
 - **One command to install:** `rex-grokbot setup` installs both directions as launchd services, and `rex-grokbot doctor` checks the whole chain.
 
@@ -27,11 +27,11 @@ Both directions live in this one package.
 
 ## Is this safe?
 
-Anyone with the token who can reach the URL can run commands on your Mac as you, so the bridge keeps both tight:
+Anyone with the token who can reach the URL can run commands on your Mac as you: even in the default mode the bot can start a new session running any command. So the bridge keeps both tight:
 
 - **Bearer token:** every MCP call needs it; it's stored mode 600, never logged, and `rex-grokbot token --rotate` revokes it at once.
 - **Tailnet only:** `127.0.0.1` plus Tailscale Serve on its own HTTPS port; never Funnel, no OAuth.
-- **You choose what's shared:** in the default `shared` mode the bot drives and hears from only the sessions and panes you share.
+- **You choose what's shared:** in the default `shared` mode the bot reads, types into and hears from only the sessions and panes you share, plus new sessions it starts itself (those are shared automatically).
 - **Audit log:** every tool call is logged (tool, truncated args, result; no token, no pane contents).
 
 Details: [docs/security.md](docs/security.md).

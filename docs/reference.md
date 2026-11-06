@@ -61,7 +61,7 @@ Program status comes from OSC 7501, which Claude Code and Pi report natively. Fo
 | Key | What | Takes effect |
 |---|---|---|
 | `mode` | `shared` (default) or `all`; see [security](security.md#modes) | The bot's next call |
-| `port`, `host` | Where the bridge listens (`127.0.0.1:7400` by default) | After `rex-grokbot setup services` |
+| `port`, `host` | Where the bridge listens (`127.0.0.1:7400` by default) | After `rex-grokbot setup services`; a `port` change also needs `rex-grokbot setup serve` (answer yes to replacing the old mapping) |
 | `servePort` | The tailnet HTTPS port (default `8443`, not `443`) | After `rex-grokbot setup serve` |
 | `webhook.url`, `webhook.key`, `webhook.header` | The Grok Bot routine's webhook (set with `rex-grokbot setup webhook`) | The next notification |
 

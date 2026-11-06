@@ -16,6 +16,10 @@ npm when the package is published). Docs and repo baseline only; no behaviour ch
   PR templates, CODEOWNERS, `.editorconfig`, `.gitattributes`, and CI (typecheck, test, build on macOS, Node 22).
 - **Tests:** every relative link and anchor in the published Markdown resolves; the bare-placeholder check covers
   every doc.
+- **The MCP server reports package.json's version** instead of a hard-coded copy (a test keeps them equal).
+- **Docs accuracy:** the front door and `llms.txt` now say that in `shared` mode the bot can also start new
+  sessions (running any command), which are then shared; and that changing the bridge's `port` also needs
+  `rex-grokbot setup serve` (also in `rex-grokbot help config`).
 - package.json description and keywords match the README; the npm package also ships `SECURITY.md` and
   `CONTRIBUTING.md`.
 

@@ -2,7 +2,7 @@
 
 What rex-grokbot-bridge lets the bot do, how you limit it, and what protects the connection.
 
-**Anyone who has the bearer token and can reach the URL can run commands on your Mac as you.** `spawn_agent` can start any program and `send_message` types into shells. Keep that in mind when you choose a mode and what to share.
+**Anyone who has the bearer token and can reach the URL can run commands on your Mac as you.** `spawn_agent` can start any program and `send_message` types into shells. Sharing limits which existing sessions the bot can touch; it does not stop the bot starting a **new** session that runs any command, in either mode. Keep that in mind when you choose a mode and what to share.
 
 ## Modes
 

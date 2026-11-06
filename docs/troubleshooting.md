@@ -11,7 +11,7 @@ Run `rex-grokbot doctor` first; every ❌ comes with a fix line. `rex-grokbot do
 | TLS / certificate error | HTTPS certificates off for the tailnet | Turn on HTTPS (admin console → DNS), then `rex-grokbot setup serve` |
 | HTTP 404 or connection refused | Tailscale Serve isn't mapping the bridge's port | `rex-grokbot setup serve` |
 | An HTML page or another app answers | The URL is missing the bridge's port (`:8443` by default) | Use exactly what `rex-grokbot url` prints |
-| HTTP 502 | Tailscale reached the Mac but the bridge isn't running | `rex-grokbot doctor` and follow its fix lines |
+| HTTP 502 | Tailscale reached the Mac but the bridge isn't running, or you changed `port` and Serve still points at the old one | `rex-grokbot doctor` and follow its fix lines; after a port change, `rex-grokbot setup serve` |
 
 The connector URL must be exactly what `rex-grokbot url` prints, including the port (`:8443` by default). Port details: [setup](setup.md#tailscale-serve-and-the-port).
 
