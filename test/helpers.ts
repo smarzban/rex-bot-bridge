@@ -96,10 +96,11 @@ export async function tempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "rex-bridge-test-"));
 }
 
-export async function startBridge(fake = new FakeRex(), mode: "watched" | "full" = "full") {
+/** `watched`: the watch-list entries (default: session S1). */
+export async function startBridge(fake = new FakeRex(), mode: "watched" | "full" = "full", watched: string[] = [S1]) {
   const dir = await tempDir();
   const watchPath = join(dir, "sessions");
-  await writeFile(watchPath, "# watched sessions\n\n" + S1 + "  # main\n");
+  await writeFile(watchPath, "# watched sessions\n\n" + watched.map((id) => `${id}  # entry\n`).join(""));
   const auditPath = join(dir, "audit.log");
   // Fake clock: sleeping advances time instantly, so timeout paths run without real waiting.
   const clock = { t: 1_000_000 };

@@ -111,19 +111,27 @@ test("config set/get: secrets hidden unless --show, config.json is 600, stdin va
 
 test("watch add/remove/list validates ids and edits the watched file", async () => {
   const home = await tempDir();
-  const env = { HOME: home };
+  // No rex binary: `watch list` shows no labels and never reaches a Rex server.
+  const env = { HOME: home, REX_BIN: join(home, "no-rex") };
   const id = "session:01a1a7e9-0000-7000-8000-000000000001";
+  const pane = "block:01a1a7e9-0000-7000-8000-0000000000b1";
   assert.equal((await cli(rexBotCli, ["watch", "add", "nope"], env)).code, 2);
-  assert.equal((await cli(rexBotCli, ["watch", "add", id], env)).stdout, `watching ${id}\n`);
-  assert.equal((await cli(rexBotCli, ["watch", "add", id], env)).stdout, `already watching ${id}\n`);
-  assert.equal((await cli(rexBotCli, ["watch", "list"], env)).stdout, `${id}\n`);
-  assert.equal((await cli(rexBotCli, ["watch", "remove", id], env)).stdout, `no longer watching ${id}\n`);
+  assert.equal((await cli(rexBotCli, ["watch", "add", "window:01a1a7e9-0000"], env)).code, 2);
+  assert.equal((await cli(rexBotCli, ["watch", "add", id], env)).stdout, `watching session ${id}\n`);
+  assert.equal((await cli(rexBotCli, ["watch", "add", id], env)).stdout, `already watching session ${id}\n`);
+  assert.equal((await cli(rexBotCli, ["watch", "add", pane], env)).stdout, `watching pane ${pane}\n`);
+  assert.equal((await cli(rexBotCli, ["watch", "list"], env)).stdout, `session ${id}\npane    ${pane}\n`);
+  assert.equal((await cli(rexBotCli, ["watch", "remove", id], env)).stdout, `no longer watching session ${id}\n`);
+  assert.equal((await cli(rexBotCli, ["watch", "remove", pane], env)).stdout, `no longer watching pane ${pane}\n`);
   assert.equal((await cli(rexBotCli, ["watch", "list"], env)).stdout, "");
 });
 
 test("say exits 0 with a clear message when no webhook is configured", async () => {
   const home = await tempDir();
-  const r = await cli(rexBotCli, ["say", "hello"], { HOME: home });
+  const sid = "session:01a1a7e9-0000-7000-8000-000000000001";
+  await mkdir(join(home, ".config/rex-grokbot-bridge"), { recursive: true });
+  await writeFile(join(home, ".config/rex-grokbot-bridge/watched"), `${sid}\n`);
+  const r = await cli(rexBotCli, ["say", "hello"], { HOME: home, REX_SESSION: sid, REX_BLOCK: "block:01a1a7e9-0000-7000-8000-0000000000b1" });
   assert.equal(r.code, 0);
   assert.match(r.stderr, /no webhook configured/);
 });

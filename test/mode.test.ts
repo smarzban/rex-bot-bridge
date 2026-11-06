@@ -30,7 +30,7 @@ const CASES: { tool: (typeof TOOL_NAMES)[number]; watched: Record<string, unknow
 ];
 
 test("every tool has a gating case", () => {
-  const covered = new Set([...CASES.map((c) => c.tool), "watch_session"]);
+  const covered = new Set([...CASES.map((c) => c.tool), "watch_session", "watch_pane", "unwatch_pane"]);
   assert.deepEqual([...covered].sort(), [...TOOL_NAMES].sort());
 });
 

@@ -128,7 +128,7 @@ test("K6: wait_for_status stops once the session is unwatched mid-wait", async (
       if (polls === 2) await watch.remove(S1);
     },
   });
-  await assert.rejects(ops.waitForStatus(B1, S1, ["done"], 60), /"watched" mode and session .* is not watched/);
+  await assert.rejects(ops.waitForStatus(B1, S1, ["done"], 60), /"watched" mode and pane .* is not watched/);
   const statusCalls = fake.calls.filter((c) => c.args[0] === "block" && c.args.at(-1) !== "process" && c.args[1] === "call");
   assert.equal(statusCalls.length, 2, "no poll after revocation");
 });

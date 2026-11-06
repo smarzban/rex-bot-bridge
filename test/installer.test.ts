@@ -276,6 +276,9 @@ test("notify/say CLI: stdout and stderr never contain the URL or key", async () 
   const KEY = "fixture-key-2"; // not a secret: test fixture
   const cli = join(import.meta.dirname, "../src/cli/rex-grokbot.ts");
   const env = childEnv({ HOME: home, REX_SESSION: "session:test", REX_BLOCK: "block:test" });
+  // say only sends from a watched pane.
+  await mkdir(join(home, ".config/rex-grokbot-bridge"), { recursive: true });
+  await writeFile(join(home, ".config/rex-grokbot-bridge/watched"), "session:test\n");
   const runCli = (args: string[], input?: string) => {
     const p = execFileP(process.execPath, ["--import", "tsx", cli, ...args], { env });
     if (input !== undefined) p.child.stdin?.end(input);

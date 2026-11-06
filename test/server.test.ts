@@ -281,7 +281,12 @@ test("watch/unwatch/list_watched round-trip preserves the file", async () => {
   const before = await readFile(bridge.watchPath, "utf8");
   const id = "session:01a1a7e9-0000-7000-8000-0000000000ee";
   assert.equal((await call(client, "watch_session", { session_id: id })).json.changed, true);
-  assert.ok((await call(client, "list_watched")).json.watched.includes(id));
+  assert.ok((await call(client, "list_watched")).json.sessions.includes(id));
+  const pane = "block:01a1a7e9-0000-7000-8000-0000000000ef";
+  assert.equal((await call(client, "watch_pane", { block_id: pane })).json.changed, true);
+  const listed = (await call(client, "list_watched")).json;
+  assert.ok(listed.panes.includes(pane) && !listed.sessions.includes(pane));
+  assert.equal((await call(client, "unwatch_pane", { block_id: pane })).json.changed, true);
   assert.equal((await call(client, "unwatch_session", { session_id: id })).json.changed, true);
   assert.equal(await readFile(bridge.watchPath, "utf8"), before);
   await client.close();
