@@ -55,7 +55,7 @@ try {
     cwd,
     new_session_label: "bridge-paste-e2e",
     label: "claude",
-    watch: false,
+    share: false,
   });
   session = spawned.session_id;
   const block = spawned.block_id;

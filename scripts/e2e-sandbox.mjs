@@ -96,7 +96,7 @@ let client;
 try {
   // ---- 1. setup ----
   const setupRes = await cli([
-    "setup", "--yes", "--no-services", "--no-serve", "--mode", "watched",
+    "setup", "--yes", "--no-services", "--no-serve", "--mode", "shared",
   ]);
   console.log(setupRes.stdout.trim());
   check(setupRes.code === 0, `setup exit ${setupRes.code} ${setupRes.stderr.trim()}`);
@@ -119,13 +119,19 @@ try {
   const initAfter = await readFile(join(SB, ".config/rex/init.lua"), "utf8");
   check(initAfter.startsWith(userInit) && initAfter.includes("-- >>> rex-grokbot-bridge >>>") && initAfter.includes(join(ROOT, "lua/rex-grokbot-actions.lua")), "init.lua got the marked dofile block, user code kept");
   check((await readdir(join(SB, ".config/rex/rex-grokbot-backups"))).length === 1, "init.lua backed up next to init.lua");
+  // T435: the palette (and the sharelist.lua it loads) passes `rex config check`, via the sandbox init.lua.
+  const cfg = await run(REX, ["config", "check", "--json", join(SB, ".config/rex/init.lua")], { env }).then((r) => r.stdout, (e) => e.stdout ?? "");
+  const cfgJson = JSON.parse(cfg.slice(cfg.search(/^\{/m)) || "{}");
+  const actionNames = (cfgJson.actions ?? []).map((a) => (typeof a === "string" ? a : a.name)).sort().join(",");
+  check((cfgJson.diagnostics ?? []).length === 0, `rex config check of the sandbox init.lua: no complaints ${JSON.stringify(cfgJson.diagnostics ?? [])}`);
+  check(actionNames === "bot_share_list,bot_share_pane_toggle,bot_share_toggle", `palette actions: ${actionNames}`);
   for (const root of [".claude", ".agents"]) {
     const skill = await readFile(join(SB, root, "skills/rex-grokbot/SKILL.md"), "utf8").catch(() => "");
     check(skill.includes("installed-by: rex-grokbot-bridge"), `skill installed in ${root}`);
   }
   check((await cli(["config", "set", "port", String(PORT)])).code === 0, `port set to ${PORT}`);
   const rerun = await cli(["setup", "--yes", "--no-services", "--no-serve", "--no-skills"]);
-  check(rerun.code === 0 && rerun.stdout.includes("already in") && rerun.stdout.includes("Mode: watched (kept)"), "setup re-run is idempotent and keeps the mode");
+  check(rerun.code === 0 && rerun.stdout.includes("already in") && rerun.stdout.includes("Mode: shared (kept)"), "setup re-run is idempotent and keeps the mode");
 
   // ---- 2. doctor (nothing running yet) ----
   const doc = await cli(["doctor", "--json"]);
@@ -204,14 +210,14 @@ try {
     return s;
   };
   const tag = Math.random().toString(36).slice(2, 7);
-  const watchedS = await mk(`e2e-sandbox-${tag}-watched`);
+  const sharedS = await mk(`e2e-sandbox-${tag}-shared`);
   const otherS = await mk(`e2e-sandbox-${tag}-other`);
-  await writeFile(join(stateDir, "watched"), "", { mode: 0o644 }); // a loosened file: watch add must make it 600 again
-  await chmod(join(stateDir, "watched"), 0o644);
-  const add = await cli(["watch", "add", watchedS.session_id]);
-  check(add.stdout.startsWith("watching"), `rex-grokbot watch add: ${add.stdout.trim()}`);
-  const wMode = (await stat(join(stateDir, "watched")).catch(() => null))?.mode & 0o777;
-  check(wMode === 0o600, `watched tightened from 0644 to 0600 on write (got ${wMode?.toString(8)})`);
+  await writeFile(join(stateDir, "shared"), "", { mode: 0o644 }); // a loosened file: watch add must make it 600 again
+  await chmod(join(stateDir, "shared"), 0o644);
+  const add = await cli(["share", "add", sharedS.session_id]);
+  check(add.stdout.startsWith("sharing"), `rex-grokbot share add: ${add.stdout.trim()}`);
+  const wMode = (await stat(join(stateDir, "shared")).catch(() => null))?.mode & 0o777;
+  check(wMode === 0o600, `shared tightened from 0644 to 0600 on write (got ${wMode?.toString(8)})`);
   await sleep(1500); // let the shells start
 
   client = new Client({ name: "e2e-sandbox", version: "0" });
@@ -227,45 +233,98 @@ try {
 
   // Gating
   const status = JSON.parse((await tool("bridge_status", {})).text);
-  check(status.mode === "watched", "bridge_status mode=watched");
+  check(status.mode === "shared", "bridge_status mode=shared");
   const refused = await tool("send_message", { block_id: otherS.block_id, text: "echo should-not-run" });
-  check(refused.isError && /"watched" mode/.test(refused.text), `send_message to unwatched session refused: ${refused.text.slice(0, 90)}…`);
+  check(refused.isError && /isn't shared with the bot/.test(refused.text), `send_message to unshared session refused: ${refused.text.slice(0, 90)}…`);
   const readRefused = await tool("read_pane", { block_id: otherS.block_id });
-  check(readRefused.isError, "read_pane of unwatched session refused");
-  const watchRefused = await tool("watch_session", { session_id: otherS.session_id });
-  check(watchRefused.isError, "watch_session refused in watched mode");
+  check(readRefused.isError, "read_pane of unshared session refused");
+  const shareRefused = await tool("share_session", { session_id: otherS.session_id });
+  check(shareRefused.isError, "share_session refused in shared mode");
 
-  // OSC 7501 done in the watched session, sent through the bridge (allowed there).
-  const sent = await tool("send_message", { block_id: watchedS.block_id, text: "printf '\\033]7501;state=done:app=e2e\\033\\\\'" });
-  check(!sent.isError, `send_message to watched session allowed ${sent.isError ? sent.text : ""}`);
-  const st = await waitFor((r) => r.body?.event === "agent_status" && r.body.rex_session === watchedS.session_id, 20_000);
+  // OSC 7501 done in the shared session, sent through the bridge (allowed there).
+  const sent = await tool("send_message", { block_id: sharedS.block_id, text: "printf '\\033]7501;state=done:app=e2e\\033\\\\'" });
+  check(!sent.isError, `send_message to shared session allowed ${sent.isError ? sent.text : ""}`);
+  const st = await waitFor((r) => r.body?.event === "agent_status" && r.body.rex_session === sharedS.session_id, 20_000);
   check(!!st, "sink got agent_status from the watcher");
   if (st) {
-    check(st.body.state === "done" && st.body.app === "e2e" && st.body.rex_block === watchedS.block_id, `agent_status payload: state=${st.body.state} app=${st.body.app}`);
+    check(st.body.state === "done" && st.body.app === "e2e" && st.body.rex_block === sharedS.block_id, `agent_status payload: state=${st.body.state} app=${st.body.app}`);
     check(st.auth === `Bearer ${KEY}`, "webhook got Authorization: Bearer <key>");
     check(st.body.source === "rex" && !!st.body.host && !!st.body.timestamp, "payload enriched with source/host/timestamp");
   }
-  // The unwatched session must stay silent.
+  // The unshared session must stay silent.
   const otherSend = await run(REX, ["send", "-s", otherS.session_id, "-b", otherS.block_id, "--", "printf '\\033]7501;state=done:app=e2e-other\\033\\\\'\n"]).then(() => 0, (e) => e.code ?? 1);
-  check(otherSend === 0, "OSC 7501 done sent into the unwatched session too");
+  check(otherSend === 0, "OSC 7501 done sent into the unshared session too");
   await sleep(5000);
-  check(!received.some((r) => r.body?.rex_session === otherS.session_id), "no agent_status for the unwatched session");
+  check(!received.some((r) => r.body?.rex_session === otherS.session_id), "no agent_status for the unshared session");
 
   // say
-  const say = await cli(["say", "hello from the sandbox"], { env: { REX_SESSION: watchedS.session_id, REX_BLOCK: watchedS.block_id } });
+  const say = await cli(["say", "hello from the sandbox"], { env: { REX_SESSION: sharedS.session_id, REX_BLOCK: sharedS.block_id } });
   check(say.code === 0 && /sent/.test(say.stderr), `rex-grokbot say: ${say.stderr.trim()}`);
   const msg = await waitFor((r) => r.body?.event === "agent_message", 3000);
-  check(msg?.body.text === "hello from the sandbox" && msg.body.rex_session === watchedS.session_id, "sink got agent_message");
+  check(msg?.body.text === "hello from the sandbox" && msg.body.rex_session === sharedS.session_id, "sink got agent_message");
   const notifyLog = await readFile(join(SB, "Library/Logs/rex-grokbot-bridge/notify.log"), "utf8").catch(() => "");
   check(notifyLog.includes("http=200") && !notifyLog.includes(KEY) && !notifyLog.includes("e2e-sink-path"), "notify.log has status codes only");
 
-  // Unwatched during the watcher's debounce: nothing is sent.
+  // Unshared during the watcher's debounce: nothing is sent.
   const t0 = Date.now();
-  await run(REX, ["send", "-s", watchedS.session_id, "-b", watchedS.block_id, "--", "printf '\\033]7501;state=blocked:app=e2e-debounce\\033\\\\'\n"]);
-  const rm = await cli(["watch", "remove", watchedS.session_id]);
-  check(rm.stdout.startsWith("no longer watching") && Date.now() - t0 < 2500, `unwatched within the 3s debounce (${Date.now() - t0}ms): ${rm.stdout.trim()}`);
+  await run(REX, ["send", "-s", sharedS.session_id, "-b", sharedS.block_id, "--", "printf '\\033]7501;state=blocked:app=e2e-debounce\\033\\\\'\n"]);
+  const rm = await cli(["share", "remove", sharedS.session_id]);
+  check(rm.stdout.startsWith("no longer sharing") && Date.now() - t0 < 2500, `unshared within the 3s debounce (${Date.now() - t0}ms): ${rm.stdout.trim()}`);
   await sleep(6000);
-  check(!received.some((r) => r.body?.app === "e2e-debounce"), "no agent_status after the session was unwatched mid-debounce");
+  check(!received.some((r) => r.body?.app === "e2e-debounce"), "no agent_status after the session was unshared mid-debounce");
+
+  // ---- 4b. pane-level watch (T435): one session, two panes, only pane A shared ----
+  const paneS = await mk(`e2e-sandbox-${tag}-panes`);
+  const sid = paneS.session_id;
+  const paneA = paneS.block_id;
+  const runB = await run(REX, ["run", "-s", sid, "-c", SB, "--focus=false", "--json", "--", process.env.SHELL || "/bin/zsh", "-l"]);
+  const paneB = JSON.parse(runB.stdout).block_ids?.[0];
+  check(!!paneB && paneB !== paneA, `second pane (another window) in the same session: ${paneB}`);
+  const addA = await cli(["share", "add", paneA]);
+  check(addA.stdout.startsWith("sharing pane"), `share add <pane A>: ${addA.stdout.trim()}`);
+  const wl = await cli(["share", "list"], { env: { REX_SERVER: env.REX_SERVER } });
+  console.log(wl.stdout.trim());
+  check(new RegExp(`^pane +${paneA}`, "m").test(wl.stdout) && !wl.stdout.includes(sid) && !wl.stdout.includes(paneB), "share list: pane A only");
+  await sleep(1500); // let the shells start
+  const osc = (block, app, state = "done") => run(REX, ["send", "-s", sid, "-b", block, "--", `printf '\\033]7501;state=${state}:app=${app}\\033\\\\'\n`]);
+  await osc(paneA, "e2e-paneA");
+  await osc(paneB, "e2e-paneB");
+  const gotA = await waitFor((r) => r.body?.event === "agent_status" && r.body.app === "e2e-paneA", 20_000);
+  check(gotA?.body.rex_block === paneA && gotA?.body.rex_session === sid, "OSC 7501 done in shared pane A reached the sink");
+  await sleep(5000);
+  check(!received.some((r) => r.body?.app === "e2e-paneB"), "OSC 7501 done in pane B (same session, not shared) did not");
+
+  const sayB = await cli(["say", "from pane B"], { env: { REX_SESSION: sid, REX_BLOCK: paneB } });
+  check(sayB.code === 0 && /not sent: this pane isn't shared/.test(sayB.stderr), `say from pane B: exit ${sayB.code}, ${sayB.stderr.trim()}`);
+  const sayA = await cli(["say", "from pane A"], { env: { REX_SESSION: sid, REX_BLOCK: paneA } });
+  check(sayA.code === 0 && /rex-grokbot: sent/.test(sayA.stderr), `say from pane A: ${sayA.stderr.trim()}`);
+  check(!!(await waitFor((r) => r.body?.event === "agent_message" && r.body.text === "from pane A", 3000)), "sink got pane A's message");
+  check(!received.some((r) => r.body?.text === "from pane B"), "sink never got pane B's message");
+  const sayOut = await cli(["say", "from outside rex"]);
+  check(sayOut.code === 0 && /not sent: not running inside a Rex pane/.test(sayOut.stderr), `say outside Rex: ${sayOut.stderr.trim()}`);
+
+  const readB = await tool("read_pane", { block_id: paneB });
+  check(readB.isError && readB.text.includes(`pane ${paneB}`) && /This Pane/.test(readB.text), `read_pane on pane B refused: ${readB.text.slice(0, 110)}…`);
+  const readA = await tool("read_pane", { block_id: paneA });
+  check(!readA.isError, `read_pane on pane A allowed ${readA.isError ? readA.text : ""}`);
+  const closeS = await tool("close_session", { session_id: sid });
+  check(closeS.isError && /A shared pane alone/.test(closeS.text), "close_session refused with only a pane shared");
+  const spawnS = await tool("spawn_agent", { agent: "shell", cwd: SB, session_id: sid });
+  check(spawnS.isError, "spawn_agent into that session refused with only a pane shared");
+  const lw = JSON.parse((await tool("list_shared", {})).text);
+  check(lw.panes.includes(paneA) && !lw.sessions.includes(sid), "list_shared: pane A under panes");
+
+  // Now watch the whole session: pane B is allowed too.
+  check((await cli(["share", "add", sid])).stdout.startsWith("sharing session"), "share add <session>");
+  const readB2 = await tool("read_pane", { block_id: paneB });
+  check(!readB2.isError, `read_pane on pane B allowed once the session is shared ${readB2.isError ? readB2.text : ""}`);
+  const sayB2 = await cli(["say", "from pane B again"], { env: { REX_SESSION: sid, REX_BLOCK: paneB } });
+  check(/rex-grokbot: sent/.test(sayB2.stderr) && !!(await waitFor((r) => r.body?.text === "from pane B again", 3000)), "say from pane B sent once the session is shared");
+  // The watcher only fires on a state change: B is already done, so go through working first.
+  await osc(paneB, "e2e-paneB2", "working");
+  await sleep(1000);
+  await osc(paneB, "e2e-paneB2");
+  check(!!(await waitFor((r) => r.body?.event === "agent_status" && r.body.app === "e2e-paneB2", 20_000)), "OSC 7501 done in pane B reaches the sink once the session is shared");
 } catch (e) {
   failures++;
   console.log(`FAIL: ${e.stack || e}`);

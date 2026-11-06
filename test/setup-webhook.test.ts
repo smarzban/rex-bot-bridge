@@ -249,7 +249,7 @@ test("T429 cli: setup webhook --key-file - reads stdin; webhook flags on bare se
   assert.equal(cli(["setup", "webhook", "--key-file", keyFile, "--yes", "--no-test"]).status, 0);
   assert.equal(JSON.parse(await readFile(join(home, ".config/rex-grokbot-bridge/config.json"), "utf8")).webhook.key, "file-secret-2");
 
-  for (const args of [["setup", "--webhook-url", URL], ["setup", "--url", URL], ["setup", "webhook", "--mode", "full"], ["setup", "nope"]]) {
+  for (const args of [["setup", "--webhook-url", URL], ["setup", "--url", URL], ["setup", "webhook", "--mode", "all"], ["setup", "nope"]]) {
     const u = cli(args);
     assert.equal(u.status, 2, args.join(" "));
     assert.match(u.stderr, /--help/);
@@ -335,15 +335,15 @@ test("T428 cli: `rex-grokbot --version` / `-v` exit 0 and print exactly the pack
 
 test("T429 FR1-E: setup webhook writes only webhook.* — a mode change during the prompts survives", async () => {
   const f = await fakeCtx({ stdout: "{}", stderr: "", code: 0 });
-  await writeSettings(f.ctx.paths.configFile, { ...DEFAULTS, mode: "watched", port: 7400 });
+  await writeSettings(f.ctx.paths.configFile, { ...DEFAULTS, mode: "shared", port: 7400 });
   const p = scriptedPrompter({ [URL_Q]: URL, [HEADER_Q]: "" });
   const ask = p.ask.bind(p);
   p.ask = async (q, o) => {
-    // While the key question is open, someone runs `rex-grokbot config set mode full` / `port 7411`.
-    if (q.includes(KEY_Q)) await writeSettings(f.ctx.paths.configFile, { ...DEFAULTS, mode: "full", port: 7411 });
+    // While the key question is open, someone runs `rex-grokbot config set mode all` / `port 7411`.
+    if (q.includes(KEY_Q)) await writeSettings(f.ctx.paths.configFile, { ...DEFAULTS, mode: "all", port: 7411 });
     return q.includes(KEY_Q) ? "k-secret-e" : ask(q, o);
   };
   assert.equal(await setupWebhook(f.ctx, NO_TEST, p), 0);
   const s = await readSettings(f.ctx.paths.configFile);
-  assert.deepEqual([s.mode, s.port, s.webhook.url, s.webhook.key], ["full", 7411, URL, "k-secret-e"]);
+  assert.deepEqual([s.mode, s.port, s.webhook.url, s.webhook.key], ["all", 7411, URL, "k-secret-e"]);
 });

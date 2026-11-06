@@ -19,7 +19,7 @@ import { ensureToken } from "../src/token.js";
 import { uninstall } from "../src/uninstall.js";
 import { runDoctor } from "../src/doctor.js";
 import { readSettings } from "../src/settings.js";
-import { WatchFile } from "../src/watch.js";
+import { ShareFile } from "../src/share.js";
 import { B1, B3, fakeCtx, FakeRex, S1, S2, tempDir } from "./helpers.js";
 
 const ROOT = join(import.meta.dirname, "..");
@@ -28,7 +28,7 @@ const ok = (stdout = ""): RunResult => ({ stdout, stderr: "", code: 0 });
 function makeOps(dir: string, rex: Runner, mode: () => Promise<Mode>, extra: Partial<ConstructorParameters<typeof Ops>[0]> = {}) {
   return new Ops({
     rex: new Rex(rex),
-    watch: new WatchFile(join(dir, "watched")),
+    shares: new ShareFile(join(dir, "shared")),
     heartbeatFile: join(dir, "heartbeat"),
     auditLogPath: join(dir, "audit.log"),
     mode,
@@ -38,9 +38,9 @@ function makeOps(dir: string, rex: Runner, mode: () => Promise<Mode>, extra: Par
   });
 }
 
-// ---------- K1: spawn_agent never re-adds an existing session in watched mode ----------
+// ---------- K1: spawn_agent never re-adds an existing session in shared mode ----------
 
-test("K1 watched mode: unwatching during an in-flight spawn into an existing session sticks", async () => {
+test("K1 shared mode: unsharing during an in-flight spawn into an existing session sticks", async () => {
   const dir = await tempDir();
   const fake = new FakeRex();
   let gate: { release: () => void; barrier: Promise<void>; reached: () => void; atRun: Promise<void> };
@@ -57,91 +57,91 @@ test("K1 watched mode: unwatching during an in-flight spawn into an existing ses
     }
     return fake.runner(args, opts);
   };
-  const ops = makeOps(dir, runner, async () => "watched");
-  const watch = new WatchFile(join(dir, "watched"));
+  const ops = makeOps(dir, runner, async () => "shared");
+  const watch = new ShareFile(join(dir, "shared"));
   await watch.add(S1);
   for (const w of [true, false]) {
     newGate();
-    const p = ops.spawnAgent({ agent: "shell", cwd: dir, session_id: S1, watch: w });
+    const p = ops.spawnAgent({ agent: "shell", cwd: dir, session_id: S1, share: w });
     await gate!.atRun;
-    await watch.remove(S1); // the human unwatches while rex run is in flight
+    await watch.remove(S1); // the human unshares while rex run is in flight
     gate!.release();
     const r = await p;
-    assert.equal(r.watched, false, `watch=${w}`);
-    assert.deepEqual(await watch.list(), [], `watch=${w}: session must stay unwatched`);
+    assert.equal(r.shared, false, `share=${w}`);
+    assert.deepEqual(await watch.list(), [], `share=${w}: session must stay unshared`);
     await watch.add(S1);
   }
 });
 
-test("K1: a new session is auto-watched in watched mode; full mode keeps watch=true adding", async () => {
+test("K1: a new session is auto-shared in shared mode; all mode keeps share=true adding", async () => {
   const dir = await tempDir();
-  const watch = new WatchFile(join(dir, "watched"));
-  const watched = makeOps(dir, new FakeRex().runner, async () => "watched");
-  const n = await watched.spawnAgent({ agent: "shell", cwd: dir, new_session_label: "x", watch: false });
-  assert.equal(n.watched, true);
+  const watch = new ShareFile(join(dir, "shared"));
+  const shared = makeOps(dir, new FakeRex().runner, async () => "shared");
+  const n = await shared.spawnAgent({ agent: "shell", cwd: dir, new_session_label: "x", share: false });
+  assert.equal(n.shared, true);
   assert.deepEqual(await watch.list(), [n.session_id]);
 
-  const full = makeOps(dir, new FakeRex().runner, async () => "full");
-  const r = await full.spawnAgent({ agent: "shell", cwd: dir, session_id: S2, watch: true });
-  assert.equal(r.watched, true);
+  const full = makeOps(dir, new FakeRex().runner, async () => "all");
+  const r = await full.spawnAgent({ agent: "shell", cwd: dir, session_id: S2, share: true });
+  assert.equal(r.shared, true);
   assert.ok((await watch.list()).includes(S2));
   await watch.remove(S2);
-  const r2 = await full.spawnAgent({ agent: "shell", cwd: dir, session_id: S2, watch: false });
-  assert.equal(r2.watched, false);
+  const r2 = await full.spawnAgent({ agent: "shell", cwd: dir, session_id: S2, share: false });
+  assert.equal(r2.shared, false);
   assert.ok(!(await watch.list()).includes(S2));
 });
 
 // ---------- K5: serve wiring fails closed ----------
 
-test("K5: serve's Ops follow config.json mode=watched and refuse an unwatched block", async () => {
+test("K5: serve's Ops follow config.json mode=shared and refuse an unshared block", async () => {
   const home = await tempDir();
   const paths = resolvePaths({ HOME: home });
-  await writeSettings(paths.configFile, { ...DEFAULTS, mode: "watched" });
+  await writeSettings(paths.configFile, { ...DEFAULTS, mode: "shared" });
   const cfg = await loadConfig({ HOME: home });
   const fake = new FakeRex();
   const ops = buildServeOps(cfg, fake.runner);
   await assert.rejects(
     ops.sendMessage({ block_id: B3, session_id: S2, text: "rm -rf ~", submit: true, require_idle: false }),
-    /"watched" mode/,
+    /isn't shared with the bot/,
   );
-  await assert.rejects(ops.sendMessage({ block_id: B3, text: "x", submit: true, require_idle: false }), /"watched" mode/);
+  await assert.rejects(ops.sendMessage({ block_id: B3, text: "x", submit: true, require_idle: false }), /isn't shared with the bot/);
   assert.equal(fake.pastes().length, 0);
   assert.equal(fake.callsOf("send-key").length, 0);
 
-  // No config.json at all: still watched (the default), never full.
+  // No config.json at all: still shared (the default), never full.
   const bare = buildServeOps(await loadConfig({ HOME: await tempDir() }), fake.runner);
-  await assert.rejects(bare.sendKeys(B3, S2, ["enter"]), /"watched" mode/);
+  await assert.rejects(bare.sendKeys(B3, S2, ["enter"]), /isn't shared with the bot/);
 });
 
 // ---------- K6: wait_for_status rechecks access before each poll ----------
 
-test("K6: wait_for_status stops once the session is unwatched mid-wait", async () => {
+test("K6: wait_for_status stops once the session is unshared mid-wait", async () => {
   const dir = await tempDir();
   const fake = new FakeRex();
   fake.state = "working";
-  const watch = new WatchFile(join(dir, "watched"));
+  const watch = new ShareFile(join(dir, "shared"));
   await watch.add(S1);
   let polls = 0;
-  const ops = makeOps(dir, fake.runner, async () => "watched", {
+  const ops = makeOps(dir, fake.runner, async () => "shared", {
     sleep: async () => {
       polls++;
       if (polls === 2) await watch.remove(S1);
     },
   });
-  await assert.rejects(ops.waitForStatus(B1, S1, ["done"], 60), /"watched" mode and session .* is not watched/);
+  await assert.rejects(ops.waitForStatus(B1, S1, ["done"], 60), /pane .* isn't shared with the bot/);
   const statusCalls = fake.calls.filter((c) => c.args[0] === "block" && c.args.at(-1) !== "process" && c.args[1] === "call");
   assert.equal(statusCalls.length, 2, "no poll after revocation");
 });
 
-test("K6: wait_for_status stops when the mode switches to watched mid-wait", async () => {
+test("K6: wait_for_status stops when the mode switches to shared mid-wait", async () => {
   const dir = await tempDir();
-  let mode: Mode = "full";
+  let mode: Mode = "all";
   const ops = makeOps(dir, new FakeRex().runner, async () => mode, {
     sleep: async () => {
-      mode = "watched";
+      mode = "shared";
     },
   });
-  await assert.rejects(ops.waitForStatus(B3, S2, ["done"], 60), /"watched" mode/);
+  await assert.rejects(ops.waitForStatus(B3, S2, ["done"], 60), /isn't shared with the bot/);
 });
 
 // ---------- K3: init.lua rollback when the check runner rejects ----------
@@ -178,11 +178,11 @@ test("K3: a rejecting check deletes an init.lua that did not exist before", asyn
 
 // ---------- K4: state files are 0600 from creation ----------
 
-test("K4/R3: watched is created 0600 (even with umask 0) and a looser existing file is tightened on replace", async () => {
+test("K4/R3: shared is created 0600 (even with umask 0) and a looser existing file is tightened on replace", async () => {
   const dir = await tempDir();
   const old = process.umask(0);
   try {
-    const w = new WatchFile(join(dir, "state/watched"));
+    const w = new ShareFile(join(dir, "state/shared"));
     await w.add(S1);
     assert.equal((await stat(w.path)).mode & 0o777, 0o600);
     assert.equal((await stat(join(dir, "state"))).mode & 0o777, 0o700);
@@ -200,7 +200,7 @@ test("K4/R3: watched is created 0600 (even with umask 0) and a looser existing f
 
 const FLAGS: SetupFlags = {
   yes: false,
-  mode: "watched",
+  mode: "shared",
   services: false,
   serve: true,
   skills: false,
@@ -335,22 +335,22 @@ test("K8 uninstall: `tailscale serve off` only for our own mapping, and only whe
 
 // ---------- Fix round 2 ----------
 
-test("R3 doctor: warns when watched/heartbeat/token/config.json are not 0600", async () => {
+test("R3 doctor: warns when shared/heartbeat/token/config.json are not 0600", async () => {
   const f = await fakeCtx(ok("{}"));
   const p = f.ctx.paths;
   await ensureToken(p.tokenFile);
   await writeSettings(p.configFile, { ...DEFAULTS });
-  await writeFile(p.watchedFile, `${S1}\n`, { mode: 0o600 });
+  await writeFile(p.sharedFile, `${S1}\n`, { mode: 0o600 });
   await writeFile(p.heartbeatFile, new Date().toISOString() + "\n", { mode: 0o600 });
-  await chmod(p.watchedFile, 0o600);
+  await chmod(p.sharedFile, 0o600);
   await chmod(p.heartbeatFile, 0o600);
   const level = async () => (await runDoctor(f.ctx, { testWebhook: false })).find((c) => c.id === "file_modes");
   assert.equal((await level())?.level, "ok");
-  await chmod(p.watchedFile, 0o644);
+  await chmod(p.sharedFile, 0o644);
   await chmod(p.heartbeatFile, 0o644);
   const c = await level();
   assert.equal(c?.level, "warn");
-  assert.match(c!.detail, /watched \(644\).*heartbeat \(644\)/);
+  assert.match(c!.detail, /shared \(644\).*heartbeat \(644\)/);
   assert.ok(!c!.detail.includes("token"), "token and config.json are still 600");
-  assert.match(c!.fix ?? "", /^chmod 600 '.*watched' '.*heartbeat'$/);
+  assert.match(c!.fix ?? "", /^chmod 600 '.*shared' '.*heartbeat'$/);
 });

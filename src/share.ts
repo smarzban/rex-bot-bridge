@@ -3,30 +3,46 @@ import { dirname, join, basename, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 
 /**
- * The bot-watch opt-in list: one session ID per line, `#` comments allowed.
- * Parsing matches bot-watch.lua: the ID is the first token before whitespace or `#`.
+ * The bot-watch share list: one entry per line, `#` comments allowed. An entry is a session
+ * (`session:<uuid>`: every pane in it) or a single pane (`block:<uuid>`: only that pane).
+ * Parsing matches lua/sharelist.lua: the entry is the first token before whitespace or `#`, and a
+ * token that isn't `session:…` or `block:…` is ignored.
  */
 export function lineId(line: string): string | null {
   const m = /^\s*([^\s#]+)/.exec(line);
   return m?.[1] ?? null;
 }
 
-export function parseWatched(content: string): string[] {
+export type ShareKind = "session" | "pane";
+
+/** The kind of a watch entry, or null for anything else (junk lines are ignored everywhere). */
+export function entryKind(id: string): ShareKind | null {
+  if (/^session:\S+$/.test(id)) return "session";
+  if (/^block:\S+$/.test(id)) return "pane";
+  return null;
+}
+
+export function parseShared(content: string): string[] {
   const ids: string[] = [];
   for (const line of content.split("\n")) {
     const id = lineId(line);
-    if (id && !ids.includes(id)) ids.push(id);
+    if (id && entryKind(id) && !ids.includes(id)) ids.push(id);
   }
   return ids;
 }
 
-export function addWatched(content: string, id: string): string {
-  if (parseWatched(content).includes(id)) return content;
+/** True when the pane is shared itself or its session is. Either id may be missing. */
+export function covers(ids: readonly string[], sessionId?: string | null, blockId?: string | null): boolean {
+  return (!!sessionId && ids.includes(sessionId)) || (!!blockId && ids.includes(blockId));
+}
+
+export function addShared(content: string, id: string): string {
+  if (parseShared(content).includes(id)) return content;
   const sep = content.length > 0 && !content.endsWith("\n") ? "\n" : "";
   return `${content}${sep}${id}\n`;
 }
 
-export function removeWatched(content: string, id: string): string {
+export function removeShared(content: string, id: string): string {
   return content
     .split("\n")
     .filter((line) => lineId(line) !== id)
@@ -34,7 +50,7 @@ export function removeWatched(content: string, id: string): string {
 }
 
 /**
- * One promise chain per file path, shared by every WatchFile instance in the process, so concurrent
+ * One promise chain per file path, shared by every ShareFile instance in the process, so concurrent
  * read/modify/write updates (parallel tool calls, each with its own MCP server) never lose an edit.
  */
 const locks = new Map<string, Promise<unknown>>();
@@ -51,7 +67,7 @@ function withLock<T>(file: string, fn: () => Promise<T>): Promise<T> {
   return run;
 }
 
-export class WatchFile {
+export class ShareFile {
   constructor(readonly path: string) {}
 
   async read(): Promise<string> {
@@ -63,17 +79,31 @@ export class WatchFile {
     }
   }
 
+  /** Every entry, sessions and panes, in file order. */
   async list(): Promise<string[]> {
-    return parseWatched(await this.read());
+    return parseShared(await this.read());
+  }
+
+  async sessions(): Promise<string[]> {
+    return (await this.list()).filter((id) => entryKind(id) === "session");
+  }
+
+  async panes(): Promise<string[]> {
+    return (await this.list()).filter((id) => entryKind(id) === "pane");
+  }
+
+  /** True when the pane or its session is on the list. */
+  async covers(sessionId?: string | null, blockId?: string | null): Promise<boolean> {
+    return covers(await this.list(), sessionId, blockId);
   }
 
   /** Returns true if the file changed. */
   async add(id: string): Promise<boolean> {
-    return this.update((c) => addWatched(c, id));
+    return this.update((c) => addShared(c, id));
   }
 
   async remove(id: string): Promise<boolean> {
-    return this.update((c) => removeWatched(c, id));
+    return this.update((c) => removeShared(c, id));
   }
 
   private update(fn: (content: string) => string): Promise<boolean> {

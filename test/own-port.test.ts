@@ -151,9 +151,9 @@ for (const [name, st] of [
 
 test("T431 settings: a bad servePort in config.json falls back to 8443", async () => {
   const f = await fakeCtx(ok("{}"));
-  await writeRawConfig(f.ctx.paths.configFile, { mode: "full", servePort: 443 });
+  await writeRawConfig(f.ctx.paths.configFile, { mode: "all", servePort: 443 });
   const s = await readSettings(f.ctx.paths.configFile);
-  assert.deepEqual([s.servePort, s.mode], [8443, "full"]);
+  assert.deepEqual([s.servePort, s.mode], [8443, "all"]);
 });
 
 // ---------- uninstall ----------

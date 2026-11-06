@@ -17,7 +17,7 @@ const cli = (args: string[]) =>
   });
 
 test("T429 help: top-level help is grouped, names every command, and points at per-command help", () => {
-  for (const g of ["Setup", "Check", "Settings", "Watch list", "For agents", "Services"]) assert.match(TOP_HELP, new RegExp(`^${g}$`, "m"));
+  for (const g of ["Setup", "Check", "Settings", "Sharing", "For agents", "Services"]) assert.match(TOP_HELP, new RegExp(`^${g}$`, "m"));
   for (const c of Object.keys(HELP)) assert.match(TOP_HELP, new RegExp(`^  ${c} `, "m"), c);
   assert.match(TOP_HELP, /Run `rex-grokbot help <command>` or `rex-grokbot <command> --help`/);
   assert.match(TOP_HELP, /docs\/grok-bot\.md/);

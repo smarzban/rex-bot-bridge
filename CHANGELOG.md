@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.7.0 — 2026-11-06
+
+What the bot may see and drive is now **shared** with it, a whole session or a single pane, and
+`rex-grokbot say` respects that.
+
+Seen live: the person shared only the coordinator's session, and the bot was notified about another agent that
+was a pane in a different window of that same session (a shared session covers every pane in it). And any agent
+with the skill could message the bot with `rex-grokbot say` from a session that wasn't shared.
+
+- **Renamed: "watch" (the bot's powers) is now "share".** No aliases, no migration (there are no installs yet):
+  modes `watched`/`full` → `shared` (default)/`all`; palette **Bot: Watch / Unwatch This Session** →
+  **Bot: Share / Unshare This Session**; CLI `rex-grokbot watch add|remove|list` → `rex-grokbot share
+  add|remove|list`; tools `watch_session`/`unwatch_session`/`list_watched` → `share_session`/`unshare_session`/
+  `list_shared`; `spawn_agent`'s `watch` → `share`; the list file `~/.config/rex-grokbot-bridge/watched` →
+  `…/shared`; `bridge_status`/`list_agents` fields `watched*` → `shared*`. The status watcher keeps its name
+  (`rex-grokbot watch`, `lua/bot-watch.lua`, `com.rexgrokbotbridge.watch`, heartbeat): it watches Rex for status
+  changes, a different thing; bare `rex-grokbot watch` runs it, and `rex-grokbot watch add` is a usage error.
+- **Pane-level sharing.** The `shared` file holds `session:<uuid>` and/or `block:<uuid>` lines; any other token is
+  ignored. A shared session covers every pane in it; a shared pane covers only that pane. One parser,
+  `lua/sharelist.lua`, is used by the watcher and the palette and kept in step with `src/share.ts` (a test runs
+  both on the same inputs).
+- **Watcher:** notifies for a status event when its pane or its session is shared (also rechecked after the
+  debounce).
+- **Bridge gating (shared mode):** `read_pane`, `send_message`, `send_keys`, `close_pane` and `wait_for_status`
+  are allowed when the pane or its session is shared. `close_session` and `spawn_agent` into an existing session
+  need the session itself shared; a shared pane is not enough. Refusals read "pane/session … isn't shared with
+  the bot; the person can share it from the Rex palette (Bot: Share / Unshare This Pane, or This Session) or
+  `rex-grokbot share add …`" with the real id. New tools `share_pane` (refused in shared mode, like
+  `share_session`) and `unshare_pane`. `list_shared` returns `shared_file`, `sessions` and `panes`; `list_agents`
+  marks each pane's `shared`; `bridge_status` adds `shared_sessions`/`shared_panes`. `close_pane`/`close_session`
+  drop their entries from the list.
+- **CLI:** `rex-grokbot share add|remove` take a session or block id; `share list` prints the kind, id and label
+  (from a running Rex server only; it never starts one).
+- **Palette:** **Bot: Share / Unshare This Session**, new **Bot: Share / Unshare This Pane** (the focused pane,
+  same alert feedback) and **Bot: List Shared** (both kinds).
+- **`rex-grokbot say`** sends only when `REX_BLOCK` or its `REX_SESSION` is shared. Otherwise (or outside Rex)
+  it prints one "not sent: this pane isn't shared with the bot …" line to stderr and exits 0, as it now also does
+  for an empty message (was exit 2). The agent skill says so.
+- **Grok Bot guide:** the connector is named `Rex`; the routine prompt handles `kind: auth` (tell the owner what
+  is needed, never paste credentials), replies to every `doctor_test` (never a duplicate), is written as intent
+  rather than tool names, and sends results to the owner in that chat; steps 2 and 3 share one
+  `rex-grokbot url`; reachability is a Tailscale host:port check followed by an HTTP GET of healthz; Node 22+ and
+  npm are listed as prerequisites; share scope (session vs pane, listing is not notification) and both ways to
+  share; `rex-usage` covers pane vs session sharing and `say` gating.
+- **Docs render on GitHub:** no bare `<…>` placeholders in prose (the README command table escapes them); a test
+  checks README, the guide, the skill and the changelog.
+
 ## 0.6.0 — 2026-11-06
 
 The project is now **rex-grokbot-bridge**, and the Grok Bot guide is written for the bot. There are no existing

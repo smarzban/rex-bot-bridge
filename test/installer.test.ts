@@ -34,7 +34,7 @@ test("settings: write creates dir 700 and file 600; read merges defaults", async
   const dir = join(await tempDir(), "state");
   const file = join(dir, "config.json");
   assert.deepEqual(await readSettings(file), DEFAULTS);
-  await writeSettings(file, setKey(DEFAULTS, "mode", "full"));
+  await writeSettings(file, setKey(DEFAULTS, "mode", "all"));
   assert.equal((await stat(dir)).mode & 0o777, 0o700);
   assert.equal((await stat(file)).mode & 0o777, 0o600);
   // A loosened file goes back to 600 on the next write.
@@ -42,7 +42,7 @@ test("settings: write creates dir 700 and file 600; read merges defaults", async
   await writeSettings(file, setKey(await readSettings(file), "port", "7412"));
   assert.equal((await stat(file)).mode & 0o777, 0o600);
   const s = await readSettings(file);
-  assert.equal(s.mode, "full");
+  assert.equal(s.mode, "all");
   assert.equal(s.port, 7412);
   assert.equal(s.servePort, 8443);
 });
@@ -276,6 +276,9 @@ test("notify/say CLI: stdout and stderr never contain the URL or key", async () 
   const KEY = "fixture-key-2"; // not a secret: test fixture
   const cli = join(import.meta.dirname, "../src/cli/rex-grokbot.ts");
   const env = childEnv({ HOME: home, REX_SESSION: "session:test", REX_BLOCK: "block:test" });
+  // say only sends from a shared pane.
+  await mkdir(join(home, ".config/rex-grokbot-bridge"), { recursive: true });
+  await writeFile(join(home, ".config/rex-grokbot-bridge/shared"), "session:test\n");
   const runCli = (args: string[], input?: string) => {
     const p = execFileP(process.execPath, ["--import", "tsx", cli, ...args], { env });
     if (input !== undefined) p.child.stdin?.end(input);

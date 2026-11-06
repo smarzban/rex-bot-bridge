@@ -18,9 +18,10 @@ import { PARTS, setup, type Part } from "../setup.js";
 import { setupWebhook } from "../webhook.js";
 import { commandHelp, TOP_HELP } from "./help.js";
 import { readToken } from "../token.js";
-import { SESSION_ID } from "../tools.js";
+import { BLOCK_ID, SESSION_ID } from "../tools.js";
 import { uninstall } from "../uninstall.js";
-import { WatchFile } from "../watch.js";
+import { entryKind, ShareFile } from "../share.js";
+import { Rex, spawnRunner } from "../rex.js";
 
 const BOOL_FLAGS = [
   "yes",
@@ -108,26 +109,64 @@ async function runWatcher(): Promise<number> {
   });
 }
 
+/** Labels for `share list`, best effort: id -> "label" (or "(closed)"); empty when Rex can't be asked. */
+async function shareLabels(rexBin: string | null, ids: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (!rexBin || ids.length === 0) return out;
+  try {
+    // Only an already-running server: listing the share list must never start one.
+    const run = spawnRunner(rexBin, 5_000);
+    const rex = new Rex((args, opts) => run(["--autostart=false", ...args], opts));
+    const sessions = await rex.sessions();
+    const blocks = new Map<string, string>();
+    for (const s of sessions) {
+      out.set(s.session_id, s.label ?? "");
+      if (!ids.some((id) => id.startsWith("block:"))) continue;
+      for (const b of await rex.blocks(s.session_id).catch(() => [])) {
+        blocks.set(b.block_id, `${b.label ?? ""}${s.label ? ` (in ${s.label})` : ""}`.trim());
+      }
+    }
+    for (const [id, label] of blocks) out.set(id, label);
+    for (const id of ids) if (!out.has(id)) out.set(id, "(closed)");
+  } catch {
+    out.clear();
+  }
+  return out;
+}
+
 async function watchCmd(pos: string[]): Promise<number> {
+  if (pos.length === 0) return runWatcher();
+  console.error("usage: rex-grokbot watch   (runs the status watcher; to share panes or sessions with the bot: rex-grokbot share add|remove|list)");
+  return 2;
+}
+
+async function shareCmd(pos: string[]): Promise<number> {
   const [sub, id] = pos;
-  if (!sub) return runWatcher();
   const ctx = makeCtx();
-  const watch = new WatchFile(ctx.paths.watchedFile);
+  const shares = new ShareFile(ctx.paths.sharedFile);
   if (sub === "list") {
-    for (const s of await watch.list()) console.log(s);
+    const ids = await shares.list();
+    const labels = await shareLabels(ctx.rexBin, ids);
+    for (const s of ids) {
+      const label = labels.get(s);
+      console.log(`${(entryKind(s) ?? "?").padEnd(7)} ${s}${label ? `  ${label}` : ""}`);
+    }
     return 0;
   }
   if (sub === "add" || sub === "remove") {
-    if (!id || !SESSION_ID.safeParse(id).success) {
-      console.error(`usage: rex-grokbot watch ${sub} session:<id>   (full id: see \`rex ls --json\` or \`rex-grokbot whoami\`)`);
+    if (!id || !(SESSION_ID.safeParse(id).success || BLOCK_ID.safeParse(id).success)) {
+      console.error(
+        `usage: rex-grokbot share ${sub} session:<id>|block:<id>   (a session covers every pane in it; a block only that pane; ids: \`rex-grokbot whoami\` or \`rex ls --json\`)`,
+      );
       return 2;
     }
     await ensurePrivateDir(ctx.paths.stateDir);
-    const changed = sub === "add" ? await watch.add(id) : await watch.remove(id);
-    console.log(`${changed ? (sub === "add" ? "watching" : "no longer watching") : sub === "add" ? "already watching" : "was not watching"} ${id}`);
+    const changed = sub === "add" ? await shares.add(id) : await shares.remove(id);
+    const what = `${entryKind(id) === "pane" ? "pane" : "session"} ${id}`;
+    console.log(`${changed ? (sub === "add" ? "sharing" : "no longer sharing") : sub === "add" ? "already sharing" : "was not sharing"} ${what}`);
     return 0;
   }
-  console.error("usage: rex-grokbot watch [add|remove <session> | list]");
+  console.error("usage: rex-grokbot share [add|remove <session:…|block:…> | list]");
   return 2;
 }
 
@@ -175,10 +214,26 @@ async function notifyCmd(): Promise<number> {
 
 async function sayCmd(text: string): Promise<number> {
   if (!text) {
-    console.error('usage: rex-grokbot say "message"');
-    return 2;
+    // Like every other not-sent path: never fail the agent that called it.
+    console.error('rex-grokbot: not sent: the message is empty (usage: rex-grokbot say "message")');
+    return 0;
   }
   const ctx = makeCtx();
+  // Only a shared pane (or a pane in a shared session) may message the bot.
+  const block = process.env.REX_BLOCK || null;
+  const session = process.env.REX_SESSION || null;
+  if (!block) {
+    console.error("rex-grokbot: not sent: not running inside a Rex pane");
+    return 0;
+  }
+  const shared = await new ShareFile(ctx.paths.sharedFile).covers(session, block).catch(() => false);
+  if (!shared) {
+    console.error(
+      "rex-grokbot: not sent: this pane isn't shared with the bot; the person can share it from the Rex palette " +
+        "(Bot: Share / Unshare This Pane, or This Session)",
+    );
+    return 0;
+  }
   const s = await readSettings(ctx.paths.configFile).catch(() => null);
   if (!s?.webhook.url) {
     console.error("rex-grokbot: no webhook configured (rex-grokbot setup webhook); message not sent");
@@ -187,8 +242,8 @@ async function sayCmd(text: string): Promise<number> {
   const payload = {
     event: "agent_message",
     text,
-    rex_session: process.env.REX_SESSION ?? null,
-    rex_block: process.env.REX_BLOCK ?? null,
+    rex_session: session,
+    rex_block: block,
     cwd: process.cwd(),
     host: hostname(),
     timestamp: new Date().toISOString(),
@@ -319,6 +374,8 @@ export async function main(argv: string[]): Promise<number> {
       return serve();
     case "watch":
       return watchCmd(pos);
+    case "share":
+      return shareCmd(pos);
     case "token":
       if (flags.show) return usageError("token always prints the token; --show is gone", "token");
       if (pos.length) return usageError(`unexpected argument: ${pos[0]}`, "token");

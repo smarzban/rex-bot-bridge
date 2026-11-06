@@ -10,12 +10,12 @@ import type { Ctx } from "../src/context.js";
 import { resolvePaths } from "../src/paths.js";
 import { Rex, type RunOptions, type RunResult } from "../src/rex.js";
 import { createBridgeHttpServer } from "../src/server.js";
-import { WatchFile } from "../src/watch.js";
+import { ShareFile } from "../src/share.js";
 
 export const S1 = "session:01a1a7e9-0000-7000-8000-000000000001";
 export const B1 = "block:01a1a7e9-0000-7000-8000-0000000000b1";
 export const B2 = "block:01a1a7e9-0000-7000-8000-0000000000b2";
-/** A second session, not on the watch list, with one pane. */
+/** A second session, not on the share list, with one pane. */
 export const S2 = "session:01a1a7e9-0000-7000-8000-000000000002";
 export const B3 = "block:01a1a7e9-0000-7000-8000-0000000000b3";
 export const TOKEN = "test-token-abcdefghijklmnopqrstuvwxyz0123456789";
@@ -96,16 +96,17 @@ export async function tempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "rex-bridge-test-"));
 }
 
-export async function startBridge(fake = new FakeRex(), mode: "watched" | "full" = "full") {
+/** `shared`: the watch-list entries (default: session S1). */
+export async function startBridge(fake = new FakeRex(), mode: "shared" | "all" = "all", shared: string[] = [S1]) {
   const dir = await tempDir();
   const watchPath = join(dir, "sessions");
-  await writeFile(watchPath, "# watched sessions\n\n" + S1 + "  # main\n");
+  await writeFile(watchPath, "# shared sessions\n\n" + shared.map((id) => `${id}  # entry\n`).join(""));
   const auditPath = join(dir, "audit.log");
   // Fake clock: sleeping advances time instantly, so timeout paths run without real waiting.
   const clock = { t: 1_000_000 };
   const ops = new Ops({
     rex: new Rex(fake.runner),
-    watch: new WatchFile(watchPath),
+    shares: new ShareFile(watchPath),
     heartbeatFile: join(dir, "heartbeat"),
     auditLogPath: auditPath,
     now: () => clock.t,

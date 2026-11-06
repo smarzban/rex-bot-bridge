@@ -10,7 +10,7 @@ export interface Paths {
   stateDir: string;
   tokenFile: string;
   configFile: string;
-  watchedFile: string;
+  sharedFile: string;
   heartbeatFile: string;
   backupsDir: string;
   /** ~/Library/Logs/rex-grokbot-bridge */
@@ -34,7 +34,7 @@ export function resolvePaths(env: NodeJS.ProcessEnv = process.env): Paths {
     stateDir,
     tokenFile: env.REX_BRIDGE_TOKEN_FILE || join(stateDir, "token"),
     configFile: join(stateDir, "config.json"),
-    watchedFile: join(stateDir, "watched"),
+    sharedFile: join(stateDir, "shared"),
     heartbeatFile: join(stateDir, "heartbeat"),
     // Next to init.lua, not in stateDir: `uninstall --purge` deletes stateDir and must keep these.
     backupsDir: join(dirname(env.REX_CONFIG || join(xdg, "rex/init.lua")), "rex-grokbot-backups"),
