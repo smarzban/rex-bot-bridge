@@ -19,13 +19,24 @@ const STUBS: Record<string, string> = {
   --version) echo "v\${STUB_NODE_MAJOR:-22}.0.0" ;;
 esac`,
   curl: `echo "curl $*" >> "$STUB_LOG"
+case "$*" in
+  *api.github.com*)
+    case "\${STUB_RELEASE:-ok}" in
+      ok) printf '{\n  "url": "https://api.github.com/x",\n  "tag_name": "v9.8.7",\n  "name": "v9.8.7"\n}\n' ;;
+      compact) printf '{"url":"https://api.github.com/x","tag_name":"v9.8.6","draft":false}' ;;
+      notag) printf '{"message": "Not Found"}\n' ;;
+      evil) printf '{"tag_name": "v1;rm -rf"}\n' ;;
+      *) exit 22 ;;
+    esac
+    exit 0 ;;
+esac
 d=$(mktemp -d); mkdir -p "$d/rex-grokbot-bridge-src"; echo '{"name":"rex-grokbot-bridge"}' > "$d/rex-grokbot-bridge-src/package.json"
 tar -czf - -C "$d" rex-grokbot-bridge-src`,
   npm: `echo "npm $*" >> "$STUB_LOG"
 case "$1" in
   --version) echo 11.0.0 ;;
   prefix) echo "\${STUB_PREFIX_SHOWN:-$STUB_PREFIX}" ;;
-  view) [ "\${STUB_PUBLISHED:-0}" = 1 ] && echo 0.3.0 || exit 1 ;;
+  view) [ -n "\${STUB_PUBLISHED:-}" ] && echo "$STUB_PUBLISHED" || exit 1 ;;
   pack) shift; while [ "$1" != "--pack-destination" ]; do shift; done; : > "$2/rex-grokbot-bridge-0.3.0.tgz" ;;
   install)
     case " $* " in
@@ -142,17 +153,87 @@ test("FR1-B install.sh: REX_GROKBOT_SOURCE=github + ref → codeload URL for tha
   assert.ok(globalInstall(calls).some((c) => /\/rex-grokbot-bridge-0\.3\.0\.tgz$/.test(c)), calls.join("\n"));
 });
 
-test("FR1-B install.sh: no source given → npm when published (latest), GitHub main when not", async () => {
+test("FR1-B install.sh: no source given → npm when a release is published (latest)", async () => {
   const pub = await sandbox();
-  pub.run({ STUB_PUBLISHED: "1" });
-  assert.ok(globalInstall(await pub.calls()).some((c) => c.endsWith(" rex-grokbot-bridge@latest")));
-  const unpub = await sandbox();
-  unpub.run();
-  assert.ok((await unpub.calls()).includes("curl -fsSL https://codeload.github.com/smarzban/rex-grokbot-bridge/tar.gz/main"));
+  const r = pub.run({ STUB_PUBLISHED: "0.3.0" });
+  assert.equal(r.status, 0, r.out);
+  const calls = await pub.calls();
+  assert.ok(globalInstall(calls).some((c) => c.endsWith(" rex-grokbot-bridge@latest")), calls.join("\n"));
+  assert.ok(!calls.some((c) => c.startsWith("curl")), "npm path never calls GitHub");
+  assert.match(r.out, /Installing rex-grokbot-bridge@latest from npm/);
   const bad = await sandbox();
-  const r = bad.run({ REX_GROKBOT_SOURCE: "pypi" });
-  assert.equal(r.status, 1);
-  assert.match(r.out, /REX_GROKBOT_SOURCE must be npm or github/);
+  const b = bad.run({ REX_GROKBOT_SOURCE: "pypi" });
+  assert.equal(b.status, 1);
+  assert.match(b.out, /REX_GROKBOT_SOURCE must be npm or github/);
+});
+
+test("T457 install.sh: not on npm → the latest GitHub release tag, never main", async () => {
+  const sb = await sandbox();
+  const r = sb.run();
+  assert.equal(r.status, 0, r.out);
+  const calls = await sb.calls();
+  assert.ok(calls.some((c) => c.startsWith("curl ") && c.endsWith("https://api.github.com/repos/smarzban/rex-grokbot-bridge/releases/latest")), calls.join("\n"));
+  assert.ok(calls.includes("curl -fsSL https://codeload.github.com/smarzban/rex-grokbot-bridge/tar.gz/v9.8.7"), calls.join("\n"));
+  assert.ok(!calls.some((c) => c.includes("tar.gz/main")));
+  assert.match(r.out, /Installing smarzban\/rex-grokbot-bridge v9\.8\.7 \(GitHub release\)/);
+  assert.ok(globalInstall(calls).some((c) => /\/rex-grokbot-bridge-0\.3\.0\.tgz$/.test(c)));
+  assert.ok(!r.out.includes("unreleased"));
+});
+
+test("T457 install.sh: compact API JSON parses too", async () => {
+  const sb = await sandbox();
+  const r = sb.run({ REX_GROKBOT_SOURCE: "github", STUB_RELEASE: "compact" });
+  assert.equal(r.status, 0, r.out);
+  assert.ok((await sb.calls()).includes("curl -fsSL https://codeload.github.com/smarzban/rex-grokbot-bridge/tar.gz/v9.8.6"));
+});
+
+test("T457 install.sh: an npm placeholder or prerelease as latest doesn't count as published → GitHub release", async () => {
+  for (const v of ["0.0.0-stage", "1.0.0-rc.1"]) {
+    const sb = await sandbox();
+    const r = sb.run({ STUB_PUBLISHED: v });
+    assert.equal(r.status, 0, r.out);
+    const calls = await sb.calls();
+    assert.ok(calls.includes("curl -fsSL https://codeload.github.com/smarzban/rex-grokbot-bridge/tar.gz/v9.8.7"), `${v}\n${calls.join("\n")}`);
+    assert.ok(!globalInstall(calls).some((c) => c.includes("rex-grokbot-bridge@")));
+  }
+});
+
+test("T457 install.sh: API failure / no release / a bad tag → clear error, nothing downloaded or installed", async () => {
+  for (const [mode, why] of [
+    ["fail", /could not read https:\/\/api\.github\.com\/repos\/smarzban\/rex-grokbot-bridge\/releases\/latest/],
+    ["notag", /no usable release tag/],
+    ["evil", /no usable release tag/],
+  ] as const) {
+    const sb = await sandbox();
+    const r = sb.run({ REX_GROKBOT_SOURCE: "github", STUB_RELEASE: mode });
+    assert.equal(r.status, 1, `${mode}: ${r.out}`);
+    assert.match(r.out, /Could not find the latest release of smarzban\/rex-grokbot-bridge on GitHub/);
+    assert.match(r.out, why);
+    assert.match(r.out, /Nothing was installed\./);
+    assert.match(r.out, /REX_GROKBOT_VERSION=vX\.Y\.Z sh/);
+    const calls = await sb.calls();
+    assert.ok(!calls.some((c) => c.includes("codeload")), `${mode}: no download`);
+    assert.deepEqual(globalInstall(calls), []);
+    assert.ok(!calls.some((c) => c.startsWith("npm install") || c.startsWith("npm pack")));
+  }
+});
+
+test("T457 install.sh: an explicit REX_GROKBOT_VERSION wins, with no API call", async () => {
+  const tag = await sandbox();
+  const t = tag.run({ REX_GROKBOT_VERSION: "v0.7.2" });
+  assert.equal(t.status, 0, t.out);
+  const calls = await tag.calls();
+  assert.ok(!calls.some((c) => c.includes("api.github.com")), calls.join("\n"));
+  assert.ok(calls.includes("curl -fsSL https://codeload.github.com/smarzban/rex-grokbot-bridge/tar.gz/v0.7.2"));
+  assert.ok(!t.out.includes("unreleased"));
+
+  const main = await sandbox();
+  const m = main.run({ REX_GROKBOT_SOURCE: "github", REX_GROKBOT_VERSION: "main" });
+  assert.equal(m.status, 0, m.out);
+  const mcalls = await main.calls();
+  assert.ok(!mcalls.some((c) => c.includes("api.github.com")));
+  assert.ok(mcalls.includes("curl -fsSL https://codeload.github.com/smarzban/rex-grokbot-bridge/tar.gz/main"));
+  assert.match(m.out, /REX_GROKBOT_VERSION=main is not a release tag: installing unreleased code \(unsupported\)/);
 });
 
 const UUID = "0f8e2c1a-1b2c-4d3e-8f90-123456789abc";

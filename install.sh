@@ -3,12 +3,15 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/smarzban/rex-grokbot-bridge/main/install.sh | sh
 #
-# Installs the rex-grokbot CLI with npm (from the npm registry once published, else from GitHub), then
-# offers to run `rex-grokbot setup`. Re-running it upgrades in place. Never uses sudo, never installs Node.
+# Installs the latest RELEASE of the rex-grokbot CLI with npm (from the npm registry once a release is
+# published there, else the latest GitHub Release, built from its tag), then offers to run
+# `rex-grokbot setup`. Re-running it upgrades in place. Never uses sudo, never installs Node.
 #
 # Environment:
-#   REX_GROKBOT_SOURCE   npm | github      where to install from (default: npm if published, else github)
-#   REX_GROKBOT_VERSION  npm version or git ref (default: latest / main)
+#   REX_GROKBOT_SOURCE   npm | github      where to install from (default: npm if a release is published
+#                                          there, else github)
+#   REX_GROKBOT_VERSION  npm version or git tag/ref (default: the latest release). `main` with
+#                        REX_GROKBOT_SOURCE=github installs unreleased code (unsupported).
 #
 # Everything runs from main(), called on the last line, so a truncated download runs nothing.
 
@@ -106,17 +109,53 @@ installed_version() {
   if [ -x "$BIN/rex-grokbot" ]; then "$BIN/rex-grokbot" --version 2>/dev/null || true; fi
 }
 
+# Sets REF to the tag of the latest GitHub Release, or RELEASE_ERR and returns 1 when the API can't be
+# reached or has no release. Fetch first, parse second: a pipe would hide a failed curl.
+latest_release_tag() {
+  api="https://api.github.com/repos/$REPO/releases/latest"
+  json=$(curl -fsSL -H 'Accept: application/vnd.github+json' "$api" 2>/dev/null) || {
+    RELEASE_ERR="could not read $api (offline, rate-limited, or no release yet)"
+    return 1
+  }
+  tag=$(printf '%s\n' "$json" | tr ',{}' '\n' |
+    sed -n 's/^[[:space:]]*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
+  case "$tag" in
+    "" | *[!A-Za-z0-9._-]*)
+      RELEASE_ERR="no usable release tag in $api"
+      return 1
+      ;;
+  esac
+  REF=$tag
+}
+
 choose_spec() {
   SOURCE=${REX_GROKBOT_SOURCE:-}
   version=${REX_GROKBOT_VERSION:-}
   if [ -z "$SOURCE" ]; then
-    if npm view "$PKG" version >/dev/null 2>&1; then SOURCE=npm; else SOURCE=github; fi
+    # npm only when its latest is a real release (X.Y.Z): a placeholder or prerelease doesn't count.
+    if npm view "$PKG" version 2>/dev/null | grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+'; then SOURCE=npm; else SOURCE=github; fi
   fi
   case "$SOURCE" in
-    npm) SPEC="$PKG@${version:-latest}" ;;
+    npm)
+      SPEC="$PKG@${version:-latest}"
+      LABEL="$SPEC from npm"
+      ;;
     github)
-      REF=${version:-main}
+      if [ -n "$version" ]; then
+        REF=$version
+      else
+        latest_release_tag || die "Could not find the latest release of $REPO on GitHub: $RELEASE_ERR. Nothing was installed. Try again later, or pick a release yourself:
+    curl -fsSL https://raw.githubusercontent.com/$REPO/main/install.sh | REX_GROKBOT_VERSION=vX.Y.Z sh
+(releases: https://github.com/$REPO/releases)"
+      fi
       SPEC="github:$REPO#$REF"
+      case "$REF" in
+        v[0-9]*) LABEL="$REPO $REF (GitHub release)" ;;
+        *)
+          LABEL="$REPO@$REF (from GitHub)"
+          warn "REX_GROKBOT_VERSION=$REF is not a release tag: installing unreleased code (unsupported)."
+          ;;
+      esac
       ;;
     *) die "REX_GROKBOT_SOURCE must be npm or github, not '$SOURCE'." ;;
   esac
@@ -176,10 +215,10 @@ main() {
   old=$(installed_version)
 
   say ""
-  label=$SPEC
+  say "Installing $LABEL"
   if [ "$SOURCE" = github ]; then build_from_github; fi
-  say "Installing $label into $PREFIX (npm install -g) ..."
-  npm install -g --no-fund --no-audit --loglevel=error "$SPEC" >/dev/null || die "npm install -g $label failed (see npm's message above)."
+  say "Installing into $PREFIX (npm install -g) ..."
+  npm install -g --no-fund --no-audit --loglevel=error "$SPEC" >/dev/null || die "npm install -g $LABEL failed (see npm's message above)."
 
   new=$("$BIN/rex-grokbot" --version 2>/dev/null) || die "Installed, but $BIN/rex-grokbot --version doesn't run."
   if [ -n "$old" ] && [ "$old" != "$new" ]; then
