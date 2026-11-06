@@ -109,7 +109,7 @@ test("config set/get: secrets hidden unless --show, config.json is 600, stdin va
   assert.equal(JSON.parse(await readFile(cfg, "utf8")).webhook.key, "sekrit-key-xyz");
 });
 
-test("watch add/remove/list validates ids and edits the shared file", async () => {
+test("share add/remove/list validates ids and edits the shared file", async () => {
   const home = await tempDir();
   // No rex binary: `share list` shows no labels and never reaches a Rex server.
   const env = { HOME: home, REX_BIN: join(home, "no-rex") };

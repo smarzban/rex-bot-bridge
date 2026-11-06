@@ -87,7 +87,7 @@ If a `Rex` connector already exists with the wrong auth/URL, remove it only afte
 
 ### Check
 
-Call `bridge_status`. Expect mode (`shared` or `full`) and Rex version. Tools should be > 0. HTTP 401 → redo the token step. "Authorization failed" or a sign-in prompt → see [If something breaks](#if-something-breaks).
+Call `bridge_status`. Expect mode (`shared` or `all`) and Rex version. Tools should be > 0. HTTP 401 → redo the token step. "Authorization failed" or a sign-in prompt → see [If something breaks](#if-something-breaks).
 
 ## 6. Create the webhook routine (you; they review)
 
