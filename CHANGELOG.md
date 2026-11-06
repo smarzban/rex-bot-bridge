@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.7.2 — 2026-11-06
+
+First release on npm: `npm i -g rex-grokbot-bridge` now works alongside the curl installer (which installs from
+npm when the package is published). Docs and repo baseline only; no behaviour changes.
+
+- **README is a front door:** what it is, highlights, how it works, a short "Is this safe?", requirements,
+  quickstart and routed links. The reference material moved, unchanged in substance, into `docs/`:
+  `docs/security.md` (modes, sharing, what notifies the bot, protections), `docs/setup.md` (install paths, what
+  setup does, Tailscale Serve port, non-interactive flags, upgrading, uninstall), `docs/reference.md` (commands,
+  MCP tools, settings, files) and `docs/troubleshooting.md`.
+- **The generated command table lives in `docs/reference.md`** (`npm run docs:commands`, now
+  `scripts/gen-reference-commands.ts`).
+- **New:** `llms.txt`, `SECURITY.md` (private vulnerability reporting), `CONTRIBUTING.md`, `AGENTS.md`, issue and
+  PR templates, CODEOWNERS, `.editorconfig`, `.gitattributes`, and CI (typecheck, test, build on macOS, Node 22).
+- **Tests:** every relative link and anchor in the published Markdown resolves; the bare-placeholder check covers
+  every doc.
+- package.json description and keywords match the README; the npm package also ships `SECURITY.md` and
+  `CONTRIBUTING.md`.
+
 ## 0.7.1 — 2026-11-06
 
 - **Share list: a cross-process lock.** The bridge, the CLI (`rex-grokbot share add|remove`) and the Rex palette

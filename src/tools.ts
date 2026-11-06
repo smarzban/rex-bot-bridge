@@ -38,7 +38,7 @@ type Result = { content: { type: "text"; text: string }[]; isError?: boolean };
 
 /** Registers every bridge tool on a fresh McpServer. Each call is audited. */
 export function buildMcpServer(ops: Ops, audit: AuditLog): McpServer {
-  const server = new McpServer({ name: "rex-grokbot-bridge", version: "0.7.1" });
+  const server = new McpServer({ name: "rex-grokbot-bridge", version: "0.7.2" });
 
   const wrap =
     <A extends Record<string, unknown>>(tool: string, fn: (args: A) => Promise<unknown>) =>
