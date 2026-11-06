@@ -119,6 +119,12 @@ try {
   const initAfter = await readFile(join(SB, ".config/rex/init.lua"), "utf8");
   check(initAfter.startsWith(userInit) && initAfter.includes("-- >>> rex-grokbot-bridge >>>") && initAfter.includes(join(ROOT, "lua/rex-grokbot-actions.lua")), "init.lua got the marked dofile block, user code kept");
   check((await readdir(join(SB, ".config/rex/rex-grokbot-backups"))).length === 1, "init.lua backed up next to init.lua");
+  // T435: the palette (and the watchlist.lua it loads) passes `rex config check`, via the sandbox init.lua.
+  const cfg = await run(REX, ["config", "check", "--json", join(SB, ".config/rex/init.lua")], { env }).then((r) => r.stdout, (e) => e.stdout ?? "");
+  const cfgJson = JSON.parse(cfg.slice(cfg.search(/^\{/m)) || "{}");
+  const actionNames = (cfgJson.actions ?? []).map((a) => (typeof a === "string" ? a : a.name)).sort().join(",");
+  check((cfgJson.diagnostics ?? []).length === 0, `rex config check of the sandbox init.lua: no complaints ${JSON.stringify(cfgJson.diagnostics ?? [])}`);
+  check(actionNames === "bot_watch_list,bot_watch_pane_toggle,bot_watch_toggle", `palette actions: ${actionNames}`);
   for (const root of [".claude", ".agents"]) {
     const skill = await readFile(join(SB, root, "skills/rex-grokbot/SKILL.md"), "utf8").catch(() => "");
     check(skill.includes("installed-by: rex-grokbot-bridge"), `skill installed in ${root}`);
@@ -266,6 +272,59 @@ try {
   check(rm.stdout.startsWith("no longer watching") && Date.now() - t0 < 2500, `unwatched within the 3s debounce (${Date.now() - t0}ms): ${rm.stdout.trim()}`);
   await sleep(6000);
   check(!received.some((r) => r.body?.app === "e2e-debounce"), "no agent_status after the session was unwatched mid-debounce");
+
+  // ---- 4b. pane-level watch (T435): one session, two panes, only pane A watched ----
+  const paneS = await mk(`e2e-sandbox-${tag}-panes`);
+  const sid = paneS.session_id;
+  const paneA = paneS.block_id;
+  const runB = await run(REX, ["run", "-s", sid, "-c", SB, "--focus=false", "--json", "--", process.env.SHELL || "/bin/zsh", "-l"]);
+  const paneB = JSON.parse(runB.stdout).block_ids?.[0];
+  check(!!paneB && paneB !== paneA, `second pane (another window) in the same session: ${paneB}`);
+  const addA = await cli(["watch", "add", paneA]);
+  check(addA.stdout.startsWith("watching pane"), `watch add <pane A>: ${addA.stdout.trim()}`);
+  const wl = await cli(["watch", "list"], { env: { REX_SERVER: env.REX_SERVER } });
+  console.log(wl.stdout.trim());
+  check(new RegExp(`^pane +${paneA}`, "m").test(wl.stdout) && !wl.stdout.includes(sid) && !wl.stdout.includes(paneB), "watch list: pane A only");
+  await sleep(1500); // let the shells start
+  const osc = (block, app, state = "done") => run(REX, ["send", "-s", sid, "-b", block, "--", `printf '\\033]7501;state=${state}:app=${app}\\033\\\\'\n`]);
+  await osc(paneA, "e2e-paneA");
+  await osc(paneB, "e2e-paneB");
+  const gotA = await waitFor((r) => r.body?.event === "agent_status" && r.body.app === "e2e-paneA", 20_000);
+  check(gotA?.body.rex_block === paneA && gotA?.body.rex_session === sid, "OSC 7501 done in watched pane A reached the sink");
+  await sleep(5000);
+  check(!received.some((r) => r.body?.app === "e2e-paneB"), "OSC 7501 done in pane B (same session, not watched) did not");
+
+  const sayB = await cli(["say", "from pane B"], { env: { REX_SESSION: sid, REX_BLOCK: paneB } });
+  check(sayB.code === 0 && /not sent: this pane isn't watched/.test(sayB.stderr), `say from pane B: exit ${sayB.code}, ${sayB.stderr.trim()}`);
+  const sayA = await cli(["say", "from pane A"], { env: { REX_SESSION: sid, REX_BLOCK: paneA } });
+  check(sayA.code === 0 && /rex-grokbot: sent/.test(sayA.stderr), `say from pane A: ${sayA.stderr.trim()}`);
+  check(!!(await waitFor((r) => r.body?.event === "agent_message" && r.body.text === "from pane A", 3000)), "sink got pane A's message");
+  check(!received.some((r) => r.body?.text === "from pane B"), "sink never got pane B's message");
+  const sayOut = await cli(["say", "from outside rex"]);
+  check(sayOut.code === 0 && /not sent: not running inside a Rex pane/.test(sayOut.stderr), `say outside Rex: ${sayOut.stderr.trim()}`);
+
+  const readB = await tool("read_pane", { block_id: paneB });
+  check(readB.isError && readB.text.includes(`pane ${paneB}`) && /This Pane/.test(readB.text), `read_pane on pane B refused: ${readB.text.slice(0, 110)}…`);
+  const readA = await tool("read_pane", { block_id: paneA });
+  check(!readA.isError, `read_pane on pane A allowed ${readA.isError ? readA.text : ""}`);
+  const closeS = await tool("close_session", { session_id: sid });
+  check(closeS.isError && /A watched pane alone/.test(closeS.text), "close_session refused with only a pane watched");
+  const spawnS = await tool("spawn_agent", { agent: "shell", cwd: SB, session_id: sid });
+  check(spawnS.isError, "spawn_agent into that session refused with only a pane watched");
+  const lw = JSON.parse((await tool("list_watched", {})).text);
+  check(lw.panes.includes(paneA) && !lw.sessions.includes(sid), "list_watched: pane A under panes");
+
+  // Now watch the whole session: pane B is allowed too.
+  check((await cli(["watch", "add", sid])).stdout.startsWith("watching session"), "watch add <session>");
+  const readB2 = await tool("read_pane", { block_id: paneB });
+  check(!readB2.isError, `read_pane on pane B allowed once the session is watched ${readB2.isError ? readB2.text : ""}`);
+  const sayB2 = await cli(["say", "from pane B again"], { env: { REX_SESSION: sid, REX_BLOCK: paneB } });
+  check(/rex-grokbot: sent/.test(sayB2.stderr) && !!(await waitFor((r) => r.body?.text === "from pane B again", 3000)), "say from pane B sent once the session is watched");
+  // The watcher only fires on a state change: B is already done, so go through working first.
+  await osc(paneB, "e2e-paneB2", "working");
+  await sleep(1000);
+  await osc(paneB, "e2e-paneB2");
+  check(!!(await waitFor((r) => r.body?.event === "agent_status" && r.body.app === "e2e-paneB2", 20_000)), "OSC 7501 done in pane B reaches the sink once the session is watched");
 } catch (e) {
   failures++;
   console.log(`FAIL: ${e.stack || e}`);
